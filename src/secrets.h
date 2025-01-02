@@ -1,8 +1,11 @@
+#ifndef SECRETS_H
+#define SECRETS_H
 
-const char* ssid = "NocturnoDeco";       // WiFi network name
-const char* password = "d4fea61aa3";     // WiFi password
-// Define MQTT parameters
-const char* mqtt_server = "192.168.0.224";  // MQTT broker address
-const char* mqtt_topic = "wp_display";   // Topic to subscribe
-const char* mqtt_user = "nocturno";         // MQTT username
-const char* mqtt_password = "Esdru_Jula66"; // MQTT password
+extern const char* ssid;          // WiFi network name
+extern const char* password;      // WiFi password
+extern const char* mqtt_server;   // MQTT broker address
+extern const char* mqtt_topic;    // Topic to subscribe
+extern const char* mqtt_user;     // MQTT username
+extern const char* mqtt_password; // MQTT password
+
+#endif // SECRETS_H
