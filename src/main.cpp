@@ -2,6 +2,8 @@
 #include "display_utils.h"
 #include "secrets.h"
 
+int ciclos = 0;
+
 void setup() {
     Serial.begin(115200); // Inicializar el puerto serie
 
@@ -20,29 +22,7 @@ void setup() {
     client.setServer(mqtt_server, 1883);
     client.setCallback(mqttCallback);
 
-    
-
-    // Inicializar la pantalla e-paper
-Serial.println("Inicializando GPIO...");
-EPD_GPIOInit();
-Serial.println("GPIO inicializado");
-
-Serial.println("Inicializando Fast Mode 1...");
-EPD_FastMode1Init();
-Serial.println("Fast Mode 1 inicializado");
-
-Serial.println("Limpiando pantalla...");
-EPD_Display_Clear();
-Serial.println("Pantalla limpiada");
-
-Serial.println("Actualizando pantalla...");
-EPD_Update();
-Serial.println("Pantalla actualizada");
-
-Serial.println("Limpiando caché...");
-EPD_Clear_R26A6H();
-Serial.println("Caché limpiada");
-
+    inicializa_display();
 
     // Inicializar variables
     v_produccion = 0;
@@ -60,13 +40,61 @@ Serial.println("Caché limpiada");
     Serial.print("actualiza el display");
     // Mostrar pantalla inicial
     actualiza_display();
+
 }
 
 void loop() {
-    // Reconectar a MQTT si es necesario
-    if (!client.connected()) {
-        reconnectMQTT();
+    switch (display) {
+        case 0:
+            // Wall Panel Home Assistant
+            // Reconectar a MQTT si es necesario
+            if (!client.connected()) {
+                reconnectMQTT();
+            }
+            client.loop(); // Procesar mensajes entrantes de MQTT
+            break;
+        case 1:
+            // OpenWeatherMap
+            if (ciclos == 0) {
+                ciclos = 6000;            
+                actualiza_display(); // Update weather display
+                js_analysis();   // Parse weather data
+                actualiza_display(); // Update weather display
+            } else {
+                ciclos--;
+            }
+            break;
+        case 2:
+            if (ciclos == 0) {
+                ciclos = 6000;                         
+                actualiza_display(); // Update weather display
+            } else {
+                ciclos--;
+            }
+        default:
+            break;
     }
-    client.loop(); // Procesar mensajes entrantes de MQTT
+
+    // el display puede tomar valores entre 0 y 2. Cuando se detecte una pulsación del pin UP subirá, y cuando se detecte una pulsación del pin DOWN bajará
+    if (digitalRead(6) == 0) {
+        Serial.print ("Display tipo:");
+        display++;
+        if (display > 2) {
+            display = 2;
+        }
+        ciclos = 0;
+        Serial.println(display);
+        delay(500);
+    }
+    if (digitalRead(4) == 0) {
+        Serial.print ("Display tipo:");
+        display--;
+        if (display < 0) {
+            display = 0;
+        }
+        ciclos = 0;
+        Serial.println(display);
+        delay(500);
+    }
     delay(10);
 }

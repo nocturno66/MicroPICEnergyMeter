@@ -8,4 +8,5 @@ extern const char* mqtt_topic;    // Topic to subscribe
 extern const char* mqtt_user;     // MQTT username
 extern const char* mqtt_password; // MQTT password
 
+
 #endif // SECRETS_H

@@ -31,13 +31,18 @@ extern unsigned int v_modo;
 extern unsigned int v_manual_automatico;
 extern String fecha;
 extern String hora;
+extern unsigned int display;
 
 extern PubSubClient client; // Declaración de client
 
 // Funciones
+void inicializa_display();
 void actualiza_display();
 void obtenerFechaHora(String fechaCompleta, String &fecha, String &hora);
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void reconnectMQTT();
+String httpGETRequest(const char* serverName);
+void js_analysis();
+
 
 #endif // DISPLAY_UTILS_H
