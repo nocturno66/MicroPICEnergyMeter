@@ -1,34 +1,39 @@
 #include "display_utils.h"
 #include "secrets.h"
-#include "pic.h"
+
+#include "EPD.h"
+#include <math.h>
+#include "sol.h"
+#include "enchufe.h"
+#include "escala.h"
+#include "flecha.h"
+#include "wificon.h"
+
+#define DIA_ACTUAL 0
+#define ULTIMAS_24h 1
 
 
-uint8_t ImageBW[27200];
+//uint8_t ImageBW[27200];
 
 // Variables relacionadas con los datos del JSON
 unsigned int v_produccion = 0;
 unsigned int v_consumo = 0;
-unsigned int v_exporimpor = 0;
-unsigned int v_sentido = 0;
-unsigned int v_tempext = 0;
-unsigned int v_tempint = 0;
-unsigned int v_humedad = 0;
-unsigned int v_particulas = 0;
-unsigned int v_litros = 0;
-float v_tempagua = 0.0;
-unsigned int v_modo = 0;
-unsigned int v_manual_automatico = 0;
+unsigned int v_margen = 0;
+
+unsigned int v_potencia_contratada = 4600;
+unsigned int v_produccion_max = 5000;
+unsigned int v_consumo_max = v_produccion_max + v_potencia_contratada;
+
 String fecha = "";
 String hora = "";
+String horaAnterior ="00:00:00";
+String fechaAnterior = "01/01/2025";
 
-// Define variables related to weather information
-String weather;
-String temperature;
-String humidity;
-String sea_level;
-String wind_speed;
-String city_js;
-int weather_flag = 0;  
+// IDIOMA ESPAÑOL
+String titulo0 = " ENERGIA ULTIMAS 24 HORAS "; // 26 caracteres
+String titulo1 = "       ENERGIA HOY        "; // 26 caracteres
+String titulo2 = "       TIEMPO REAL        "; // 26 caracteres
+//                012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
 // Define variables related to JSON data
 String jsonBuffer;
 int httpResponseCode;
@@ -38,6 +43,15 @@ unsigned int display = 0;   // '0' for Wall Panel Home Assistant, '1' for openwe
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+
+
+//float produccion_acumulada[24] = {0}; // Producción acumulada por hora
+//float consumo_acumulado[24] = {0};    // Consumo acumulado por hora
+float produccion_acumulada[24] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 300.0, 1000.0, 2000.0, 2800.0, 3200.0, 3500.0, 3500.0, 3200.0, 2500.0, 1800.0, 900.0, 300.0, 0.0, 0.0, 0.0, 0.0}; // Producción acumulada por hora
+float consumo_acumulado[24] = {200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 500.0, 2000.0, 2500.0, 2500.0, 2800.0, 2800.0, 2800.0, 2800.0, 2800.0, 2500.0, 2000.0, 1800.0, 1500.0, 1500.0, 1500.0, 1500.0, 1500.0}; // Consumo acumulado por hora
+int hora_anterior = -1; // Para detectar cambios de hora
+int hora_actual = -1;
+
 
 void inicializa_display() {
     // Set the screen power pin to output mode and set it to high level to turn on the power
@@ -50,149 +64,202 @@ void inicializa_display() {
     pinMode(5, INPUT);  // Set GPIO 5 to input mode CONF
     pinMode(6, INPUT);  // Set GPIO 6 to input mode UP
 
-    // Inicializar la pantalla e-paper
-    Serial.println("Inicializando GPIO...");
-    EPD_GPIOInit();
-    Serial.println("GPIO inicializado");
-
-    Serial.println("Inicializando Fast Mode 1...");
-    EPD_FastMode1Init();
-    Serial.println("Fast Mode 1 inicializado");
-
-    Serial.println("Limpiando pantalla...");
-    EPD_Display_Clear();
-    Serial.println("Pantalla limpiada");
-
-    Serial.println("Actualizando pantalla...");
+    EPD_Init();
+    EPD_Clear(0, 0, 296, 128, WHITE);
+    EPD_ALL_Fill(WHITE);
     EPD_Update();
-    Serial.println("Pantalla actualizada");
-
-    Serial.println("Limpiando caché...");
-    EPD_Clear_R26A6H();
-    Serial.println("Caché limpiada");
+    EPD_Clear_R26H();
 }
 
-void actualiza_display() {
-    char buffer[40];
+void clear_all()
+{
+  EPD_Init();
+  EPD_Clear(0, 0, 296, 128, WHITE);
+  EPD_ALL_Fill(WHITE);
+  EPD_Update();
+  EPD_Clear_R26H();
+}
 
-    if (display==0) { // Wall Panel Home Assistant
-        Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE);
-        Paint_Clear(WHITE);
+void simbolo_wifi(int estado) {
+    if (estado)
+        EPD_ShowPicture(287, 0, 8, 8, gImage_wifi, BLACK);
+    else
+        EPD_ShowPicture(287, 0, 8, 8, gImage_blanca, BLACK);
+}
 
-        EPD_ShowPicture(0, 0, 792, 272, gImage_fondo, WHITE);
+void simbolo_mqtt(int estado) {
+    if (estado)
+        EPD_ShowPicture(278, 0, 8, 8, gImage_mqtt, BLACK);
+    else
+        EPD_ShowPicture(278, 0, 8, 8, gImage_blanca, BLACK);
+}
 
-        if (v_modo == 0) {
-            EPD_ShowPicture(625, 120, 64, 52, gImage_enchufe, WHITE);
-        } else {
-            EPD_ShowPicture(625, 105, 64, 83, gImage_fuego, WHITE);
-        }
+void encabezado(String titulo) {
+    char buffer[50];
+    snprintf(buffer, sizeof(buffer), "%10s %8s %s", fecha.c_str(),hora.c_str(),titulo.c_str());
+    EPD_ShowString(0, 0, buffer, BLACK, 12);
+    simbolo_wifi(1);
+    simbolo_mqtt(1);
 
-        if (v_sentido == 0) {
-            EPD_ShowPicture(100, 170, 64, 40, gImage_exportar, WHITE);
-        } else {
-            EPD_ShowPicture(100, 170, 64, 40, gImage_importar, WHITE);
-        }
+}
 
-        snprintf(buffer, sizeof(buffer), "%s", fecha.c_str());
-        EPD_ShowString(10, 1, buffer, 24, BLACK);
 
-        snprintf(buffer, sizeof(buffer), "%s", hora.c_str());
-        EPD_ShowString(150, 1, buffer, 24, BLACK);
+void actualiza_display_2() {
+    char buffer[50];
 
-        snprintf(buffer, sizeof(buffer), "%u KWh", v_produccion);
-        EPD_ShowString(120, 50, buffer, 24, BLACK);
+        EPD_Clear(0, 0, 296, 128, WHITE);
 
-        snprintf(buffer, sizeof(buffer), "%u KWh", v_consumo);
-        EPD_ShowString(40, 130, buffer, 24, BLACK);
+        encabezado(titulo2);
+        
+        snprintf(buffer, sizeof(buffer), "Produccion");
+        EPD_ShowString(0, 44, buffer, BLACK, 16);
 
-        snprintf(buffer, sizeof(buffer), "%u KWh", v_exporimpor);
-        EPD_ShowString(120, 220, buffer, 24, BLACK);
+        snprintf(buffer, sizeof(buffer), "%u Wh", v_produccion);
+        EPD_ShowString(0, 62, buffer, BLACK, 16);
 
-        snprintf(buffer, sizeof(buffer), "%u`C", v_tempext);
-        EPD_ShowString(385, 25, buffer, 24, BLACK);
+        snprintf(buffer, sizeof(buffer), "Consumo");
+        EPD_ShowString(0, 88, buffer, BLACK, 16);
+        snprintf(buffer, sizeof(buffer), "%u Wh", v_consumo);
+        EPD_ShowString(0, 104, buffer, BLACK, 16);
 
-        snprintf(buffer, sizeof(buffer), "%u`C", v_tempint);
-        EPD_ShowString(385, 130, buffer, 24, BLACK);
 
-        snprintf(buffer, sizeof(buffer), "%u %%", v_humedad);
-        EPD_ShowString(385, 182, buffer, 24, BLACK);
+        EPD_ShowGauge(100-v_margen*100/(v_potencia_contratada+v_produccion));
+        
+        snprintf(buffer, sizeof(buffer), "Margen:", v_margen);
+        EPD_ShowString(150, 80, buffer, BLACK, 16);
+        snprintf(buffer, sizeof(buffer), "%uWh", v_margen);
+        EPD_ShowString(140, 100, buffer, BLACK, 24);
 
-        snprintf(buffer, sizeof(buffer), "%u %%", v_particulas);
-        EPD_ShowString(385, 220, buffer, 24, BLACK);
-
-        snprintf(buffer, sizeof(buffer), "%u litros", v_litros);
-        EPD_ShowString(650, 20, buffer, 24, BLACK);
-
-        snprintf(buffer, sizeof(buffer), "%3.1f`C", v_tempagua);
-        EPD_ShowString(650, 50, buffer, 24, BLACK);
-
-        if (v_manual_automatico == 0) {
-            EPD_ShowString(650, 80, "Manual", 24, BLACK);
-        } else {
-            EPD_ShowString(650, 80, "Automatico", 24, BLACK);
-        }
-
-        EPD_Display(ImageBW);
+        EPD_DisplayImage(ImageBW);
         EPD_PartUpdate();
-    } else if (display==1) {
-        // openweather
 
-        // Clear the image and initialize the e-ink screen
-        Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE); // Create a new image
-        Paint_Clear(WHITE); // Clear the image content
 
-        // Display the image
-        EPD_ShowPicture(0, 0, 792, 272, pic_original, WHITE); // Display the background image
+}
 
-        // Display the corresponding weather icon based on the weather icon flag
-        EPD_ShowPicture(4, 3, 432, 184, Weather_Num[weather_flag], WHITE);
-        
-        // Draw partition lines
-        EPD_DrawLine(0, 190, 792, 190, BLACK); // Draw a horizontal line
-        EPD_DrawLine(530, 0, 530, 270, BLACK); // Draw a vertical line
+void actualiza_display_0() {
+    char buffer[50];
+    int x = 103;
+    int y1 = 12;
+    int y2 = 71;
+    int ancho = 192;
+    int alto = 48;
+    int anchocolumna = (ancho-24)/24;
 
-        // Display the update time
-        memset(buffer, 0, sizeof(buffer));
-        snprintf(buffer, sizeof(buffer), "%s ", city_js); // Format the update time as a string
-        EPD_ShowString(620, 60, buffer, 24, BLACK); // Display the update time
+    float prod_total, cons_total;
 
-        // Display the temperature
-        memset(buffer, 0, sizeof(buffer));
-        snprintf(buffer, sizeof(buffer), "%s C", temperature); // Format the temperature as a string
-        EPD_ShowString(340, 240, buffer, 24, BLACK); // Display the temperature
-
-        // Display the humidity
-        memset(buffer, 0, sizeof(buffer));
-        snprintf(buffer, sizeof(buffer), "%s ", humidity); // Format the humidity as a string
-        EPD_ShowString(620, 150, buffer, 24, BLACK); // Display the humidity
-
-        // Display the wind speed
-        memset(buffer, 0, sizeof(buffer));
-        snprintf(buffer, sizeof(buffer), "%s m/s", wind_speed); // Format the wind speed as a string
-        EPD_ShowString(135, 240, buffer, 24, BLACK); // Display the wind speed
-
-        // Display the sea level pressure
-        memset(buffer, 0, sizeof(buffer));
-        snprintf(buffer, sizeof(buffer), "%s ", sea_level); // Format the sea level pressure as a string
-        EPD_ShowString(620, 240, buffer, 24, BLACK); // Display the sea level pressure*/
-
-        // Update the e-ink screen display content
-        EPD_Display(ImageBW); // Display the image
-        EPD_PartUpdate(); // Partially update the screen
-    } else if (display==2) {
-        // Clear the image and initialize the e-ink screen
-        Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE); // Create a new image
-        Paint_Clear(WHITE); // Clear the image content
-        
-        // Display the image
-        EPD_ShowPicture(0, 0, 792, 272, pic, WHITE); // Display the background image
-        // Update the e-ink screen display content
-        EPD_Display(ImageBW); // Display the image
-        EPD_PartUpdate(); // Partially update the screen
-
+    prod_total = 0.0;
+    cons_total = 0.0;
+    for (int i = 0; i < 24; i++) {
+        prod_total += produccion_acumulada[i];
+        cons_total += consumo_acumulado[i];
     }
 
+    //EPD_GPIOInit();
+    EPD_Clear(0, 0, 296, 128, WHITE);
+    encabezado(titulo0);
+    
+    EPD_ShowPicture(0, y1+10, 16, 16, gImage_sol, BLACK);
+    snprintf(buffer, sizeof(buffer), "%7.1fKWh", prod_total/1000);
+    EPD_ShowString(17, y1, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7.1fWh", produccion_acumulada[hora_actual]);
+    EPD_ShowString(17, y1+12, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7uW", v_produccion);
+    EPD_ShowString(17, y1+24, buffer, BLACK, 12);
+    EPD_DrawRectangle(0, y1, 80, 36, BLACK, WHITE);
+    EPD_ShowPicture(0, y1+38, 80, 5, gImage_escala, BLACK);
+    int xflecha = v_produccion*77/v_produccion_max;
+    if (xflecha > 77) xflecha = 77;
+    if (xflecha < 0) xflecha = 0;
+    EPD_ShowPicture(xflecha, y1+43, 8, 8, gImage_flecha, BLACK);
+    
+    EPD_ShowPicture(0, y2+10, 16, 22, gImage_enchufe, BLACK);
+    snprintf(buffer, sizeof(buffer), "%7.1fKWh", cons_total/1000);
+    EPD_ShowString(17, y2, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7.1fWh", consumo_acumulado[hora_actual]);
+    EPD_ShowString(17, y2+12, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7uW", v_consumo);
+    EPD_ShowString(17, y2+24, buffer, BLACK, 12);
+    EPD_DrawRectangle(0, y2, 80, 36, BLACK, WHITE);
+    EPD_ShowPicture(0, y2+38, 80, 5, gImage_escala, BLACK);
+    xflecha = v_consumo*77/v_consumo_max;
+    if (xflecha > 77) xflecha = 77;
+    if (xflecha < 0) xflecha = 0;
+    EPD_ShowPicture(xflecha, y2+43, 8, 8, gImage_flecha, BLACK);
+
+    EPD_DrawBarGraph(x, y1, ancho, alto, anchocolumna, 1, produccion_acumulada, ULTIMAS_24h);  
+    snprintf(buffer, sizeof(buffer), "-24h       -12h   %6.1fWh^", produccion_acumulada[hora_actual]);
+    EPD_ShowString(x, y1+alto+1, buffer, BLACK, 8);
+    EPD_DrawBarGraph(x, y2, ancho, alto, anchocolumna, 1, consumo_acumulado, ULTIMAS_24h);  
+    snprintf(buffer, sizeof(buffer), "-24h       -12h   %6.1fWh^", consumo_acumulado[hora_actual]);
+    EPD_ShowString(x, y2+alto+1, buffer, BLACK, 8);
+    
+    // Actualizar pantalla
+    EPD_DisplayImage(ImageBW);
+    EPD_PartUpdate();
 }
+
+void actualiza_display_1() {
+    char buffer[50];
+    int x = 103;
+    int y1 = 12;
+    int y2 = 71;
+    int ancho = 192;
+    int alto = 48;
+    int anchocolumna = (ancho-24)/24;
+
+    float prod_total, cons_total;
+
+    prod_total = 0.0;
+    cons_total = 0.0;
+    for (int i = 0; i <= hora_actual; i++) {
+        prod_total += produccion_acumulada[i];
+        cons_total += consumo_acumulado[i];
+    }
+
+    //EPD_GPIOInit();
+    EPD_Clear(0, 0, 296, 128, WHITE);
+    encabezado(titulo1);
+    
+    EPD_ShowPicture(0, y1+10, 16, 16, gImage_sol, BLACK);
+    snprintf(buffer, sizeof(buffer), "%7.1fKWh", prod_total/1000);
+    EPD_ShowString(17, y1, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7.1fWh", produccion_acumulada[hora_actual]);
+    EPD_ShowString(17, y1+12, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7uW", v_produccion);
+    EPD_ShowString(17, y1+24, buffer, BLACK, 12);
+    EPD_DrawRectangle(0, y1, 80, 36, BLACK, WHITE);
+    EPD_ShowPicture(0, y1+38, 80, 5, gImage_escala, BLACK);
+    int xflecha = v_produccion*77/v_produccion_max;
+    if (xflecha > 77) xflecha = 77;
+    if (xflecha < 0) xflecha = 0;
+    EPD_ShowPicture(xflecha, y1+43, 8, 8, gImage_flecha, BLACK);
+    
+    EPD_ShowPicture(0, y2+10, 16, 22, gImage_enchufe, BLACK);
+    snprintf(buffer, sizeof(buffer), "%7.1fKWh", cons_total/1000);
+    EPD_ShowString(17, y2, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7.1fWh", consumo_acumulado[hora_actual]);
+    EPD_ShowString(17, y2+12, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7uW", v_consumo);
+    EPD_ShowString(17, y2+24, buffer, BLACK, 12);
+    EPD_DrawRectangle(0, y2, 80, 36, BLACK, WHITE);
+    EPD_ShowPicture(0, y2+38, 80, 5, gImage_escala, BLACK);
+    xflecha = v_consumo*77/v_consumo_max;
+    if (xflecha > 77) xflecha = 77;
+    if (xflecha < 0) xflecha = 0;
+    EPD_ShowPicture(xflecha, y2+43, 8, 8, gImage_flecha, BLACK);
+
+    EPD_DrawBarGraph(x, y1, ancho, alto, anchocolumna, 1, produccion_acumulada, DIA_ACTUAL);  
+    snprintf(buffer, sizeof(buffer), "-24h       -12h   %6.1fWh^", produccion_acumulada[hora_actual]);
+    EPD_ShowString(x, y1+alto+1, buffer, BLACK, 8);
+    EPD_DrawBarGraph(x, y2, ancho, alto, anchocolumna, 1, consumo_acumulado, DIA_ACTUAL);  
+    snprintf(buffer, sizeof(buffer), "-24h       -12h   %6.1fWh^", consumo_acumulado[hora_actual]);
+    EPD_ShowString(x, y2+alto+1, buffer, BLACK, 8);
+    
+    // Actualizar pantalla
+    EPD_DisplayImage(ImageBW);
+    EPD_PartUpdate();
+};
+    
 
 void obtenerFechaHora(String fechaCompleta, String &fecha, String &hora) {
     int dia = fechaCompleta.substring(8, 10).toInt();
@@ -252,6 +319,20 @@ void obtenerFechaHora(String fechaCompleta, String &fecha, String &hora) {
            (segundos < 10 ? "0" : "") + String(segundos);
 }
 
+void actualiza_display() {
+    switch (display) {
+        case 0:
+            actualiza_display_0();
+            break;
+        case 1:
+            actualiza_display_1();
+            break;
+        case 2:
+            actualiza_display_2();
+            break;
+    }
+};
+
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
     char jsonPayload[length + 1];
     memcpy(jsonPayload, payload, length);
@@ -262,6 +343,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         Serial.println("Error: JSON parsing failed!");
         return;
     }
+    
 
     if (myObject.hasOwnProperty("pro")) {
         v_produccion = int(myObject["pro"]);
@@ -269,39 +351,26 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (myObject.hasOwnProperty("con")) {
         v_consumo = int(myObject["con"]);
     }
-    if (myObject.hasOwnProperty("exi")) {
-        v_exporimpor = int(myObject["exi"]);
-    }
-    if (myObject.hasOwnProperty("sen")) {
-        v_sentido = int(myObject["sen"]);
-    }
-    if (myObject.hasOwnProperty("tex")) {
-        v_tempext = int(myObject["tex"]);
-    }
-    if (myObject.hasOwnProperty("tin")) {
-        v_tempint = int(myObject["tin"]);
-    }
-    if (myObject.hasOwnProperty("hum")) {
-        v_humedad = int(myObject["hum"]);
-    }
-    if (myObject.hasOwnProperty("par")) {
-        v_particulas = int(myObject["par"]);
-    }
-    if (myObject.hasOwnProperty("lit")) {
-        v_litros = int(myObject["lit"]);
-    }
-    if (myObject.hasOwnProperty("tag")) {
-        v_tempagua = (double)myObject["tag"];
-    }
-    if (myObject.hasOwnProperty("mod")) {
-        v_modo = (bool)myObject["mod"] ? 1 : 0;
-    }
-    if (myObject.hasOwnProperty("mau")) {
-        v_manual_automatico = (bool)myObject["mau"] ? 1 : 0;
-    }
     if (myObject.hasOwnProperty("fec")) {
         obtenerFechaHora(myObject["fec"], fecha, hora);
+        hora_actual = hora.toInt();  // Convertir la hora a int
     }
+        // Actualizar acumulados por hora
+    if (hora_actual != -1) {
+        // Si se detecta un cambio de hora, reiniciar los acumulados para la nueva hora
+        if (hora_actual != hora_anterior) {
+            produccion_acumulada[hora_actual] = 0.0;
+            consumo_acumulado[hora_actual] = 0.0;
+            hora_anterior = hora_actual;
+        }
+    }
+
+    consumo_acumulado[hora_actual] += integraEnergia(v_consumo,hora, horaAnterior);
+    produccion_acumulada[hora_actual] += integraEnergia(v_produccion, hora, horaAnterior);
+    mantenerHoraAnterior(fecha, hora, horaAnterior, fechaAnterior);
+
+    v_margen = v_potencia_contratada+v_produccion-v_consumo;
+
 
     actualiza_display();
 }
@@ -324,100 +393,248 @@ void reconnectMQTT() {
 }
 
 
+void EPD_ShowGauge(uint8_t percentage) {
+    // Validar el porcentaje entre 0 y 100
+    if (percentage > 100) {
+        percentage = 100;
+    }
 
-// Define the HTTP GET request function
-String httpGETRequest(const char* serverName) {
-  WiFiClient client;
-  HTTPClient http;
+    // Dimensiones y posición del gauge
+    uint16_t centerX = 176;   // Centro de la pantalla (296 / 2)
+    uint16_t centerY = 127;   // Centro de la pantalla (256 / 2)
+    uint16_t outerRadius = 120; // Radio exterior del gauge
+    uint16_t innerRadius = 60;  // Radio interior del gauge
+    uint16_t startAngle = 180;  // Ángulo de inicio (izquierda abajo)
+    uint16_t endAngle = 0;      // Ángulo de fin (derecha abajo)
 
-  // Initialize the HTTP client and specify the requested server URL
-  http.begin(client, serverName);
+    // Calcular el ángulo correspondiente al porcentaje
+    float percentageAngle = startAngle - (startAngle - endAngle) * (percentage / 100.0);
 
-  // Send an HTTP GET request
-  httpResponseCode = http.GET();
+    // Recorrer cada píxel dentro de los límites del rectángulo que contiene el gauge
+    for (int y = centerY - outerRadius; y <= centerY + outerRadius; y++) {
+        for (int x = centerX - outerRadius; x <= centerX + outerRadius; x++) {
+            // Calcular distancia al centro
+            float dx = x - centerX;
+            float dy = y - centerY;
+            float distance = sqrt(dx * dx + dy * dy);
 
-  // Initialize the returned response content
-  String payload = "{}";
+            // Verificar si el píxel está dentro del anillo del gauge
+            if (distance >= innerRadius && distance <= outerRadius) {
+                // Calcular el ángulo del píxel con respecto al centro
+                float angle = atan2(-dy, dx) * 180.0 / PI;  // Convertir a grados
+                if (angle < 0) angle += 360;
 
-  // Check the response code and process the response content
-  if (httpResponseCode > 0) {
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpResponseCode); // Print the response code
-    payload = http.getString(); // Get the response content
-  }
-  else {
-    Serial.print("Error code: ");
-    Serial.println(httpResponseCode); // Print the error code
-  }
-  // Release the HTTP client resources
-  http.end();
+                // Verificar si el ángulo está dentro del rango a rellenar
+                if (angle >= endAngle && angle <= startAngle) {
+                    if (angle <= percentageAngle) {
+                        EPD_DrawPoint(x, y, WHITE);  // Rellenar sector
+                    } else {
+                        EPD_DrawPoint(x, y, BLACK); // Rellenar el resto como fondo
+                    }
+                }
+            }
+        }
+    }
 
-  return payload; // Return the response content
+    // Dibujar los bordes exteriores e interiores del gauge
+    for (int angle = startAngle; angle >= endAngle; angle--) {
+        float rad = angle * PI / 180.0;
+
+        // Borde exterior
+        uint16_t outerX = centerX + outerRadius * cos(rad);
+        uint16_t outerY = centerY - outerRadius * sin(rad);
+        EPD_DrawPoint(outerX, outerY, BLACK);
+
+        // Borde interior
+        uint16_t innerX = centerX + innerRadius * cos(rad);
+        uint16_t innerY = centerY - innerRadius * sin(rad);
+        EPD_DrawPoint(innerX, innerY, BLACK);
+    }
 }
 
-void js_analysis()
-{
-  // Check if successfully connected to the WiFi network
-  if (WiFi.status() == WL_CONNECTED) {
-    // Build the OpenWeatherMap API request URL
-    // OpenWeatherMap API key
-    String  openWeatherMapApiKey = "5307f05ae8c33c1ffe4192c80d79f95c";
-    String serverPath = "http://api.openweathermap.org/data/2.5/weather?q=Coria,2519233&APPID=" + openWeatherMapApiKey + "&units=metric";
+void EPD_DrawRectangle(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint8_t color, uint8_t hueco_relleno) {
+    // Dibujar el rectángulo
+    for (uint16_t i = 0; i < width; i++) {
+        for (uint16_t j = 0; j < height; j++) {
+            if (hueco_relleno == 0) {
+                EPD_DrawPoint(x + i, y + j, color);
+            } else {
+                if (i == 0 || i == width - 1 || j == 0 || j == height - 1) {
+                    EPD_DrawPoint(x + i, y + j, color);
+                }
+            }
+        }
+    }
+};
 
-    // Loop until a valid HTTP response code of 200 is obtained
-    while (httpResponseCode != 200) {
-      // Send an HTTP GET request and get the response content
-      jsonBuffer = httpGETRequest(serverPath.c_str());
-      Serial.println(jsonBuffer); // Print the obtained JSON data
-      myObject = JSON.parse(jsonBuffer); // Parse the JSON data
 
-      // Check if JSON parsing was successful
-      if (JSON.typeof(myObject) == "undefined") {
-        Serial.println("Parsing input failed!"); // Error message when parsing fails
-        return; // Exit the function if parsing fails
-      }
-      delay(2000); // Wait for 2 seconds before retrying
+// Definir el array global para los promedios de energía (24 valores)
+void EPD_DrawBarGraph(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint16_t bar_width, uint16_t bar_spacing, float energy_values[24], uint8_t tipo_rango) {
+    // x, y: Coordenadas del borde superior izquierdo de la gráfica
+    // width: Ancho total de la gráfica
+    // height: Altura total de la gráfica
+    // bar_width: Ancho de cada barra
+    // bar_spacing: Espacio entre las barras
+    // energy_values: Array de valores para las 24 barras
+    // hora_actual: Índice de la hora actual (0 a 23)
+
+    // Número de barras (basado en el array recibido)
+    uint16_t num_bars = 24;
+
+    // Crear un array reorganizado para que la hora actual sea la última barra
+    float adjusted_values[24];
+    for (uint16_t i = 0; i < num_bars; i++) {
+        if (tipo_rango == ULTIMAS_24h) {
+            uint16_t new_index = (i + hora_actual + 1) % num_bars;
+            adjusted_values[i] = energy_values[new_index];
+        } else {
+            adjusted_values[i] = energy_values[i];
+        }
     }
 
-    // Extract weather information from the parsed JSON data
-    weather = JSON.stringify(myObject["weather"][0]["main"]); // Weather main information
-    temperature = JSON.stringify(myObject["main"]["temp"]); // Temperature
-    humidity = JSON.stringify(myObject["main"]["humidity"]); // Humidity
-    sea_level = JSON.stringify(myObject["main"]["sea_level"]); // Sea level pressure
-    wind_speed = JSON.stringify(myObject["wind"]["speed"]); // Wind speed
-    city_js = JSON.stringify(myObject["name"]); // City name
+    // Calcular el espacio total ocupado por una barra (ancho + separación)
+    uint16_t total_bar_width = bar_width + bar_spacing;
 
-    // Print the extracted weather information
-    Serial.print("String weather: ");
-    Serial.println(weather);
-    Serial.print("String Temperature: ");
-    Serial.println(temperature);
-    Serial.print("String humidity: ");
-    Serial.println(humidity);
-    Serial.print("String sea_level: ");
-    Serial.println(sea_level);
-    Serial.print("String wind_speed: ");
-    Serial.println(wind_speed);
-    Serial.print("String city_js: ");
-    Serial.println(city_js);
-
-    // Set the weather icon flag based on the weather description
-    if (weather.indexOf("clouds") != -1 || weather.indexOf("Clouds") != -1) {
-      weather_flag = 1; // Cloudy
-    } else if (weather.indexOf("clear sky") != -1 || weather.indexOf("Clear sky") != -1) {
-      weather_flag = 3; // Clear sky
-    } else if (weather.indexOf("rain") != -1 || weather.indexOf("Rain") != -1) {
-      weather_flag = 5; // Rainy
-    } else if (weather.indexOf("thunderstorm") != -1 || weather.indexOf("Thunderstorm") != -1) {
-      weather_flag = 2; // Thunderstorm
-    } else if (weather.indexOf("snow") != -1 || weather.indexOf("Snow") != -1) {
-      weather_flag = 4; // Snowy
-    } else if (weather.indexOf("mist") != -1 || weather.indexOf("Mist") != -1) {
-      weather_flag = 0; // Foggy
+    // Determinar el valor máximo
+    float max_value = adjusted_values[0];
+    for (uint16_t i = 0; i < num_bars; i++) {
+        if (adjusted_values[i] > max_value) {
+            max_value = adjusted_values[i];
+        }
     }
-  }
-  else {
-    // Print a message if the WiFi connection is lost
-    Serial.println("WiFi Disconnected");
-  }
+
+    // Mostrar los valores máximo y mínimo en el eje Y
+    char label[10];
+    snprintf(label, sizeof(label), "%.1f", max_value / 1000);
+    EPD_ShowString(x - 23, y, label, BLACK, 8); // Máximo
+
+    snprintf(label, sizeof(label), "KWh");
+    EPD_ShowString(x - 21, (2 * y + height) / 2 - 4, label, BLACK, 8); // Unidad
+
+    snprintf(label, sizeof(label), "0.0");
+    EPD_ShowString(x - 23, y + height - 8, label, BLACK, 8); // Mínimo
+
+    // Dibujar las barras
+    for (uint16_t i = 0; i < num_bars; i++) {
+        if (((tipo_rango == DIA_ACTUAL) && (i<=hora_actual)) || (tipo_rango == ULTIMAS_24h)) {
+            
+            // Calcular la altura de la barra proporcional al valor
+            float value = adjusted_values[i];
+            if (value > max_value) {
+                value = max_value;
+            }
+            uint16_t bar_height = (uint16_t)((value / max_value) * height);
+
+            // Calcular la posición x de la barra
+            uint16_t bar_x = x + i * total_bar_width;
+
+            // Calcular la posición y de la barra
+            uint16_t bar_y = y + (height - bar_height);
+
+            // Dibujar la barra (patrón especial para la última barra)
+            for (uint16_t bx = bar_x; bx < (bar_x + bar_width); bx++) {
+                for (uint16_t by = bar_y; by < (bar_y + bar_height); by++) {
+                    if (((i == num_bars - 1) && (tipo_rango == ULTIMAS_24h)) || ((i == hora_actual) && (tipo_rango == DIA_ACTUAL))) {
+                        // Patrón gris (dibujar solo píxeles alternos)
+                        if ((bx + by) % 2 == 0) {
+                            EPD_DrawPoint(bx, by, BLACK);
+                        }
+                    } else {
+                        // Barra completamente negra
+                        EPD_DrawPoint(bx, by, BLACK);
+                    }
+                }
+            }
+        }
+    }
+
+    // Dibujar el borde del gráfico
+    for (uint16_t i = 0; i <= width; i++) {
+        //EPD_DrawPoint(x + i, y, BLACK);                 // Borde superior
+        EPD_DrawPoint(x + i, y + height, BLACK);        // Borde inferior
+    }
+    for (uint16_t i = 0; i <= height; i++) {
+        EPD_DrawPoint(x, y + i, BLACK);                 // Borde izquierdo
+        //EPD_DrawPoint(x + width, y + i, BLACK);         // Borde derecho
+    }
+}
+
+
+
+
+float integraEnergia(int consumoActual, String horaActual, String horaAnterior) {
+    float energiaIntervalo;
+
+    // Imprimir entradas iniciales
+    Serial.println("=== Debug integraEnergia ===");
+    Serial.print("Consumo actual: ");
+    Serial.println(consumoActual);
+    Serial.print("Hora actual: ");
+    Serial.println(horaActual);
+    Serial.print("Hora anterior: ");
+    Serial.println(horaAnterior);
+
+    // Convertir horaActual y horaAnterior a segundos desde el inicio del día
+    int hActual, mActual, sActual;
+    int hAnterior, mAnterior, sAnterior;
+
+    sscanf(horaActual.c_str(), "%02d:%02d:%02d", &hActual, &mActual, &sActual);
+    sscanf(horaAnterior.c_str(), "%02d:%02d:%02d", &hAnterior, &mAnterior, &sAnterior);
+
+    // Imprimir horas convertidas
+    Serial.print("Hora actual (h:m:s): ");
+    Serial.print(hActual); Serial.print(":");
+    Serial.print(mActual); Serial.print(":");
+    Serial.println(sActual);
+
+    Serial.print("Hora anterior (h:m:s): ");
+    Serial.print(hAnterior); Serial.print(":");
+    Serial.print(mAnterior); Serial.print(":");
+    Serial.println(sAnterior);
+
+    unsigned long segundosActual = hActual * 3600 + mActual * 60 + sActual;
+    unsigned long segundosAnterior = hAnterior * 3600 + mAnterior * 60 + sAnterior;
+
+    // Imprimir tiempo en segundos
+    Serial.print("Segundos actuales: ");
+    Serial.println(segundosActual);
+    Serial.print("Segundos anteriores: ");
+    Serial.println(segundosAnterior);
+
+    // Calcular el tiempo transcurrido en segundos
+    long deltaSegundos = segundosActual - segundosAnterior;
+    if (deltaSegundos < 0) {
+        // Si el tiempo actual es menor que el anterior, asumimos un cambio de día
+        deltaSegundos += 24 * 3600;
+        Serial.println("Cambio de día detectado. Ajustando deltaSegundos.");
+    }
+
+    if (deltaSegundos<3600) {
+
+
+    Serial.print("Delta segundos: ");
+    Serial.println(deltaSegundos);
+
+    // Calcular la energía consumida en el intervalo (Wh)
+    energiaIntervalo = (float(consumoActual) * deltaSegundos) / 3600.0;
+
+    // Imprimir energía calculada en el intervalo
+    Serial.print("Energía intervalo (Wh): ");
+    Serial.println(energiaIntervalo);
+    } else {
+        energiaIntervalo =0;
+    }
+    // Devolver el nuevo consumo acumulado
+    return energiaIntervalo;
+}
+
+
+void mantenerHoraAnterior(String fecha, String hora, String &horaAnterior, String &fechaAnterior) {
+    // Si la fecha cambia, reiniciar horaAnterior a las 00:00:00 del nuevo día
+    if (fecha != fechaAnterior) {
+        fechaAnterior = fecha;
+        horaAnterior = "00:00:00";
+    } else {
+        horaAnterior = hora;
+    }
 }

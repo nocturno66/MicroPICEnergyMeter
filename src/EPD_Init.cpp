@@ -1,366 +1,236 @@
 #include "EPD_Init.h"
-#include "EPD.h"
 
-
-
-/*******************************************************************
-    函数说明:判忙函数
-    入口参数:无
-    说明:忙状态为1
-*******************************************************************/
+/**
+ * @brief       EPD读忙
+ * @param       无
+ * @retval      无
+ * @note        BUSY 高电平为忙状态 低电平为空闲状态
+ */
 void EPD_READBUSY(void)
 {
-  while (1)
-  {
-    if (EPD_ReadBUSY == 0)
+    while (1)
     {
-      break;
+        if (EPD_ReadBUSY == 0)
+        {
+            break;
+        }
     }
-  }
+    delayMicroseconds(100);
 }
-/*******************************************************************
-    函数说明:硬件复位函数
-    入口参数:无
-    说明:在E-Paper进入Deepsleep状态后需要硬件复位
-*******************************************************************/
+
+/**
+ * @brief       EPD软硬件复位
+ * @param       无
+ * @retval      无
+ * @note        退出休眠时需要进行一次硬件复位
+ */
 void EPD_HW_RESET(void)
 {
-  delay(10);
-  EPD_RES_Clr();
-  delay(10);
-  EPD_RES_Set();
-  delay(10);
-  EPD_READBUSY();
+    delay(100);
+    EPD_RES_Set();
+    delay(10);
+    EPD_RES_Clr();
+    delay(10);
+    EPD_RES_Set();
+    delay(10);
+    EPD_READBUSY();   /* 检测是否完成硬件复位 */
 }
 
-/*******************************************************************
-    函数说明:更新函数
-    入口参数:无
-    说明:更新显示内容到E-Paper
-*******************************************************************/
+/**
+ * @brief       EPD进入休眠模式
+ * @param       无
+ * @retval      无
+ * @note        不同休眠模式下功耗不同 默认配置模式1 保留RAM数据
+ */
+void EPD_Sleep(void)
+{
+    EPD_WR_REG(0x10); /* 休眠指令 具体参考SSD1680 datasheet */
+    EPD_WR_DATA8(0x01);
+    delay(100);
+}
+
+/**
+****************************************************************************
+* 此处简单对R22h做简单介绍，方便理解R22h的参数配置
+* R22h寄存器可配置位为A7 A6 A5 A4 A3 A2 A1 A0;其功能如下
+* A7 Enable internal clock oscillator                  使能内部时钟振荡器
+* A6 Turn-on DC-Dc boost                               启动DC-DC升压
+* A5 Read the temperature sensor                       读取温度传感器
+* A4 Search and load the LUT from OTP                  搜索并从OTP加载LUT
+* A3 Perform 0=DISPLAY Mode 1 1=DISPLAY Mode 2         控制EPD的显示模式
+* A2 Perform image display (content in RAM)sequence    执行RAM中的图像显示
+* A1 Turn-off DC-DC boost                              关闭DC-DC升压
+* A0 Disable the internal clock oscillator             失能内部时钟振荡器
+* 关于温度传感器说明：EPD是通过内置的温度传感器进行相应的LUT加载 从而实现不
+* 同的显示模式如本工程中的快刷模式就是如此 通过给定温度系数 执行相应的刷新
+* 关于显示模式；模式1 模式2可以理解为全刷 局刷模式
+****************************************************************************
+*/
+
+/**
+ * @brief       EPD全刷模式更新显示
+ * @param       无
+ * @retval      无
+ */
 void EPD_Update(void)
 {
-  EPD_WR_REG(0x22);
-  EPD_WR_DATA8(0xF7);
-  EPD_WR_REG(0x20);
-  EPD_READBUSY();
+    EPD_WR_REG(0x22); /* 显示模式控制指令 具体参考SSD1680 datasheet */
+    /* 更新显示之前 开时钟 开DC-DC 开始读取环温 加载LUT 工作在全刷模式 执行图像刷新 保持DC-DC 时钟开启*/
+    EPD_WR_DATA8(0xF4);
+    EPD_WR_REG(0x20); /* 激活指令 具体参考SSD1680 datasheet */
+    EPD_READBUSY();
 }
-/*******************************************************************
-    函数说明:局刷更新函数
-    入口参数:无
-    说明:E-Paper工作在局刷模式
-*******************************************************************/
-void EPD_PartUpdate(void)
-{
-  EPD_WR_REG(0x22);
-  EPD_WR_DATA8(0xDC);
-  EPD_WR_REG(0x20);
-  EPD_READBUSY();
-}
-/*******************************************************************
-    函数说明:快刷更新函数
-    入口参数:无
-    说明:E-Paper工作在快刷模式
-*******************************************************************/
+
 void EPD_FastUpdate(void)
 {
-  EPD_WR_REG(0x22);
-  EPD_WR_DATA8(0xC7);
-  EPD_WR_REG(0x20);
-  EPD_READBUSY();
+    EPD_HW_RESET();
+    EPD_WR_REG(0x22);
+    /* 快刷模式需要写入指定的温度参数 开时钟 开始读取环温 加载LUT 工作在全刷模式 关闭时钟*/
+    EPD_WR_DATA8(0xB1);
+    EPD_WR_REG(0x20); /* 激活指令 具体参考SSD1680 datasheet */
+    EPD_READBUSY();
+
+    EPD_WR_REG(0x1A); /* 写入温度参数指令*/
+    EPD_WR_DATA8(0x64);
+    EPD_WR_DATA8(0x00);
+
+    EPD_WR_REG(0x22);
+    EPD_WR_DATA8(0x91);
+    EPD_WR_REG(0x20); /* 激活指令 具体参考SSD1680 datasheet */
+    EPD_READBUSY(); 
+    
+    EPD_WR_REG(0x22);
+    EPD_WR_DATA8(0xC7);
+    EPD_WR_REG(0x20); /* 激活指令 具体参考SSD1680 datasheet */
+    EPD_READBUSY();   
 }
 
-/*******************************************************************
-    函数说明:休眠函数
-    入口参数:无
-    说明:屏幕进入低功耗模式
-*******************************************************************/
-void EPD_DeepSleep(void)
+/**
+ * @brief       EPD局刷模式更新显示
+ * @param       无
+ * @retval      无
+ */
+void EPD_PartUpdate(void)
 {
-//    EPD_WR_REG(0x3C);
-//    EPD_WR_DATA8(0x01);
-//    EPD_READBUSY();
+    EPD_WR_REG(0x22); /* 显示模式控制指令 具体参考SSD1680 datasheet */
+    /* 如果局刷之前已经开启时钟以及DC-DC并且没有关闭的话那么这里我们就无需再次开启否则必须开启！！！ */
+    /* 开启时钟 开启DC-DC 读取环温 加载LUT 工作在局刷模式 执行图像刷新 保持DC-DC 时钟开启*/
+    EPD_WR_DATA8(0xFC); /* 未避免用户对使用流程不熟悉这里默认做开启配置,如前面已经开启此处可以修改为 0x1C*/
+    EPD_WR_REG(0x20);
+    EPD_READBUSY();
+}
 
-  EPD_WR_REG(0x10);
-  EPD_WR_DATA8(0x01);
-  delay(5);
+/**
+************************************************************************
+* 此处简单对R26h做简单介绍说明
+* SSD1680支持驱动 黑白EPD 黑白红EPD;
+* 驱动黑白EPD的时候 26H寄存器可以理解为存储的上 一帧的数据内容
+* 为了保证局刷模式可以达到理想的刷新效果需要擦除R26H寄存器的内容
+* 驱动黑白红EPD的时候 26H寄存器存储的为红色图像数据
+************************************************************************
+*/
+/**
+ * @brief       EPD擦除26H寄存器
+ * @param       无
+ * @retval      无
+ */
+void EPD_Clear_R26H(void)
+{
+    uint32_t i;
+    EPD_WR_REG(0x26); /* 写RAM指令 具体参考SSD1680 datasheet */
+    for (i = 0; i < ALLSCREEN_BYTES; i++)
+    {
+        EPD_WR_DATA8(WHITE);
+    }
+    EPD_READBUSY();
+}
+
+/**
+ * @brief       EPD全屏颜色填充
+ * @param       color：填充颜色值
+ * @retval      无
+ */
+void EPD_ALL_Fill(uint8_t color)
+{
+    uint32_t i;
+    EPD_WR_REG(0x3C); /* 边界波形控制指令 具体参考SSD1680 datasheet */
+    if (color)
+    {
+        EPD_WR_DATA8(0x01);
+    }
+    else
+    {
+        EPD_WR_DATA8(0x00);
+    }
+    EPD_WR_REG(0x24); /* 写RAM指令 具体参考SSD1680 datasheet */
+    for (i = 0; i < ALLSCREEN_BYTES; i++)
+    {
+        EPD_WR_DATA8(color);
+    }
+    EPD_READBUSY();
+}
+
+/**
+ * @brief       EPD全屏显示图像
+ * @param       ImageBW：图像数组名
+ * @retval      无
+ */
+void EPD_DisplayImage(const uint8_t *ImageBW)
+{
+    uint32_t i;
+    EPD_WR_REG(0x3C);
+    EPD_WR_DATA8(0x01);
+    EPD_WR_REG(0x24);
+    for (i = 0; i < ALLSCREEN_BYTES; i++)
+    {
+        EPD_WR_DATA8(~ImageBW[i]);
+    }
 }
 
 void EPD_Init(void)
 {
-  EPD_HW_RESET();
-  EPD_READBUSY();
-  EPD_WR_REG(0x12);
-  EPD_READBUSY();
-}
+    EPD_GPIOInit();
+    EPD_HW_RESET();
 
-void EPD_FastMode1Init(void)
-{
-  EPD_HW_RESET();
-  EPD_READBUSY();
-  EPD_WR_REG(0x12);  //SWRESET
-  EPD_READBUSY();
+    EPD_WR_REG(0x12); /* 软件复位指令 具体参考SSD1680 datasheet */
+    EPD_READBUSY();   /* 检测是否完成软件复位 */
 
-  EPD_WR_REG(0x18); //Read built-in temperature sensor
-  EPD_WR_DATA8(0x80);
+    EPD_WR_REG(0x01);   /* 配置驱动器输出控制 */
+    EPD_WR_DATA8(0x27); /* 配置MUX线设置 */
+    EPD_WR_DATA8(0x01); /* 配置MUX线设置 */
+    EPD_WR_DATA8(0x00); /* 配置EPD扫描方式 */
 
-  EPD_WR_REG(0x22); // Load temperature value
-  EPD_WR_DATA8(0xB1);
-  EPD_WR_REG(0x20);
-  EPD_READBUSY();
+    EPD_WR_REG(0x11); /* 配置数据输入模式同时配置写入RAM按照逐行式写入 */
+    EPD_WR_DATA8(0x03);
 
-  EPD_WR_REG(0x1A); // Write to temperature register
-  EPD_WR_DATA8(0x64);
-  EPD_WR_DATA8(0x00);
+    EPD_WR_REG(0x44); /* 配置RAM起始X地址 以及Y地址 */
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0x0F);
 
-  EPD_WR_REG(0x22); // Load temperature value
-  EPD_WR_DATA8(0x91);
-  EPD_WR_REG(0x20);
-  EPD_READBUSY();
+    EPD_WR_REG(0x45);
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0x27);
+    EPD_WR_DATA8(0x01);
 
-  EPD_WR_REG(0x3C);
-  EPD_WR_DATA8(0x3);
-  EPD_READBUSY();
-}
+    EPD_WR_REG(0x3C);   /* 配置边框线颜色 */
+    EPD_WR_DATA8(0x01); // 0x01->0x05
 
-void EPD_SetRAMMP(void)
-{
-  EPD_WR_REG(0x11);	 // Data Entry mode setting
-  EPD_WR_DATA8(0x05);     // 1 –Y decrement, X increment
-  EPD_WR_REG(0x44);	 						 // Set Ram X- address Start / End position
-  EPD_WR_DATA8(0x00);     						 // XStart, POR = 00h
-  EPD_WR_DATA8(0x31); //400/8-1
-  EPD_WR_REG(0x45);	 									// Set Ram Y- address  Start / End position
-  EPD_WR_DATA8(0x0f);
-  EPD_WR_DATA8(0x01);  //300-1
-  EPD_WR_DATA8(0x00);     									// YEnd L
-  EPD_WR_DATA8(0x00);
-}
+    EPD_WR_REG(0x18); /* 配置为内部温度传感器 */
+    EPD_WR_DATA8(0x80);
 
-void EPD_SetRAMMA(void)
-{
-  EPD_WR_REG(0x4e);
-  EPD_WR_DATA8(0x00);
-  EPD_WR_REG(0x4f);
-  EPD_WR_DATA8(0x0f);
-  EPD_WR_DATA8(0x01);
-}
+    //    EPD_WR_REG(0x22);
+    //    EPD_WR_DATA8(0xF4);
+    //    EPD_WR_REG(0x20);
+    //    EPD_READBUSY();
 
-void EPD_SetRAMSP(void)
-{
-  EPD_WR_REG(0x91);
-  EPD_WR_DATA8(0x04);
-  EPD_WR_REG(0xc4);	 // Set Ram X- address Start / End position
-  EPD_WR_DATA8(0x31);// XStart, POR = 00h
-  EPD_WR_DATA8(0x00);
-  EPD_WR_REG(0xc5);	 // Set Ram Y- address  Start / End position
-  EPD_WR_DATA8(0x0f);
-  EPD_WR_DATA8(0x01);
-  EPD_WR_DATA8(0x00);// YEnd L
-  EPD_WR_DATA8(0x00);
-}
+    EPD_WR_REG(0x4E);
+    EPD_WR_DATA8(0x00);
+    EPD_WR_REG(0x4F);
+    EPD_WR_DATA8(0x00);
+    EPD_WR_DATA8(0x00);
 
-void EPD_SetRAMSA(void)
-{
-  EPD_WR_REG(0xce);
-  EPD_WR_DATA8(0x31);
-  EPD_WR_REG(0xcf);
-  EPD_WR_DATA8(0x0f);
-  EPD_WR_DATA8(0x01);
-}
+    //    EPD_WR_REG(0x0C);           /* 配置Booster启动时间 */
 
-void EPD_Clear_R26A6H(void)
-{
-  uint16_t i, j;
-  EPD_SetRAMMA();
-  EPD_WR_REG(0x26);
-  for (i = 0; i < Gate_BITS; i++)
-  {
-    for (j = 0; j < Source_BYTES; j++)
-    {
-      EPD_WR_DATA8(0xFF);
-    }
-  }
-  EPD_SetRAMSA();
-  EPD_WR_REG(0xA6);
-  for (i = 0; i < Gate_BITS; i++)
-  {
-    for (j = 0; j < Source_BYTES; j++)
-    {
-      EPD_WR_DATA8(0xFF);
-    }
-  }
-}
-
-void EPD_Display_Clear(void)
-{
-  uint16_t i, j;
-  EPD_SetRAMMP();
-  EPD_SetRAMMA();
-  EPD_WR_REG(0x24);
-  for (i = 0; i < Gate_BITS; i++)
-  {
-    for (j = 0; j < Source_BYTES; j++)
-    {
-      EPD_WR_DATA8(0xFF);
-    }
-  }
-  EPD_SetRAMMA();
-  EPD_WR_REG(0x26);
-  for (i = 0; i < Gate_BITS; i++)
-  {
-    for (j = 0; j < Source_BYTES; j++)
-    {
-      EPD_WR_DATA8(0x00);
-    }
-  }
-  EPD_SetRAMSP();
-  EPD_SetRAMSA();
-  EPD_WR_REG(0xA4);
-  for (i = 0; i < Gate_BITS; i++)
-  {
-    for (j = 0; j < Source_BYTES; j++)
-    {
-      EPD_WR_DATA8(0xFF);
-    }
-  }
-  EPD_SetRAMSA();
-  EPD_WR_REG(0xA6);
-  for (i = 0; i < Gate_BITS; i++)
-  {
-    for (j = 0; j < Source_BYTES; j++)
-    {
-      EPD_WR_DATA8(0x00);
-    }
-  }
-}
-
-
-void EPD_Display(const uint8_t *ImageBW)
-{
-  uint32_t i;
-  uint8_t tempOriginal;
-  uint32_t tempcol = 0;
-  uint32_t templine = 0;
-  EPD_SetRAMMP();
-  EPD_SetRAMMA();
-  EPD_WR_REG(0x24);
-  for (i = 0; i < ALLSCREEN_BYTES; i++)
-  {
-    tempOriginal = *(ImageBW + templine * Source_BYTES * 2 + tempcol);
-    templine++;
-    if (templine >= Gate_BITS)
-    {
-      tempcol++;
-      templine = 0;
-    }
-    EPD_WR_DATA8(tempOriginal);
-  }
-  EPD_SetRAMSP();
-  EPD_SetRAMSA();
-  EPD_WR_REG(0xa4);   //write RAM for black(0)/white (1)
-  for (i = 0; i < ALLSCREEN_BYTES; i++)
-  {
-    tempOriginal = *(ImageBW + templine * Source_BYTES * 2 + tempcol);
-    templine++;
-    if (templine >= Gate_BITS)
-    {
-      tempcol++;
-      templine = 0;
-    }
-    EPD_WR_DATA8(tempOriginal);
-  }
-}
-
-//Horizontal scanning, from right to left, from bottom to top
-void EPD_WhiteScreen_ALL_Fast(const unsigned char *datas)
-{
-  unsigned int i;
-  unsigned char tempOriginal;
-  unsigned int tempcol = 0;
-  unsigned int templine = 0;
-
-  EPD_WR_REG(0x11);
-  EPD_WR_DATA8(0x05);
-
-  EPD_WR_REG(0x44); //set Ram-X address start/end position
-  EPD_WR_DATA8(0x00);
-  EPD_WR_DATA8(0x31);    //0x12-->(18+1)*8=152
-
-  EPD_WR_REG(0x45); //set Ram-Y address start/end position
-  EPD_WR_DATA8(0x0F);   //0x97-->(151+1)=152
-  EPD_WR_DATA8(0x01);
-  EPD_WR_DATA8(0x00);
-  EPD_WR_DATA8(0x00);
-
-  EPD_WR_REG(0x4E);
-  EPD_WR_DATA8(0x00);
-  EPD_WR_REG(0x4F);
-  EPD_WR_DATA8(0x0F);
-  EPD_WR_DATA8(0x01);
-
-  EPD_READBUSY();
-  EPD_WR_REG(0x24);   //write RAM for black(0)/white (1)
-  for (i = 0; i < Source_BYTES * Gate_BITS; i++)
-  {
-    tempOriginal = *(datas + templine * Source_BYTES * 2 + tempcol);
-    templine++;
-    if (templine >= Gate_BITS)
-    {
-      tempcol++;
-      templine = 0;
-    }
-    EPD_WR_DATA8(~tempOriginal);
-  }
-
-  EPD_WR_REG(0x26);   //write RAM for black(0)/white (1)
-  for (i = 0; i < Source_BYTES * Gate_BITS; i++)
-  {
-    EPD_WR_DATA8(0X00);
-  }
-
-
-  EPD_WR_REG(0x91);
-  EPD_WR_DATA8(0x04);
-
-  EPD_WR_REG(0xC4); //set Ram-X address start/end position
-  EPD_WR_DATA8(0x31);
-  EPD_WR_DATA8(0x00);    //0x12-->(18+1)*8=152
-
-  EPD_WR_REG(0xC5); //set Ram-Y address start/end position
-  EPD_WR_DATA8(0x0F);   //0x97-->(151+1)=152  ÐÞ¸ÄµÄ
-  EPD_WR_DATA8(0x01);
-  EPD_WR_DATA8(0x00);
-  EPD_WR_DATA8(0x00);
-
-  EPD_WR_REG(0xCE);
-  EPD_WR_DATA8(0x31);
-  EPD_WR_REG(0xCF);
-  EPD_WR_DATA8(0x0F);
-  EPD_WR_DATA8(0x01);
-
-  EPD_READBUSY();
-
-  tempcol = tempcol - 1; //Byte dislocation processing
-  templine = 0;
-  EPD_WR_REG(0xa4);   //write RAM for black(0)/white (1)
-  for (i = 0; i < Source_BYTES * Gate_BITS; i++)
-  {
-    tempOriginal = *(datas + templine * Source_BYTES * 2 + tempcol);
-    templine++;
-    if (templine >= Gate_BITS)
-    {
-      tempcol++;
-      templine = 0;
-    }
-    EPD_WR_DATA8(~tempOriginal);
-  }
-
-  EPD_WR_REG(0xa6);   //write RAM for black(0)/white (1)
-  for (i = 0; i < Source_BYTES * Gate_BITS; i++)
-  {
-    EPD_WR_DATA8(0X00);
-  }
-
-  EPD_FastUpdate();
+    EPD_READBUSY();
 }

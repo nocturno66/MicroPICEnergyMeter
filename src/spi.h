@@ -18,6 +18,8 @@
 //#define CS 10
 //#define BUSY 48
 
+
+/* ����˿ڵ�ƽ״̬ */
 #define EPD_SCK_Clr() digitalWrite(SCK, LOW)
 #define EPD_SCK_Set() digitalWrite(SCK, HIGH)
 
@@ -35,6 +37,7 @@
 
 #define EPD_ReadBUSY digitalRead(BUSY)
 
+/* �������� */
 void EPD_GPIOInit(void);
 void EPD_WR_Bus(uint8_t dat);
 void EPD_WR_REG(uint8_t reg);
