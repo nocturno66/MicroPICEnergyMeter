@@ -4,6 +4,7 @@
 
 int ciclos = 0;
 extern unsigned int display;
+extern int hora_actual;
 
 void setup() {
     Serial.begin(115200); // Inicializar el puerto serie
@@ -14,7 +15,7 @@ void setup() {
     // Inicializar variables
     v_produccion = 0;
     v_consumo = 0;
-    v_margen = 0;
+    v_capacidad = 0;
 
     Serial.print("actualiza el display");
     // Mostrar pantalla inicial
@@ -57,8 +58,37 @@ void loop() {
         actualiza_display();
         delay(50);
     }
-    
-
+    /*if (digitalRead(4) == 0) {
+        hora_actual--;
+        if (hora_actual < 0) {
+            hora_actual = 23;
+        }
+        ciclos = 0;
+        Serial.println(display);
+        actualiza_display();
+        delay(50);
+    }
+    if (digitalRead(6) == 0) {
+        hora_actual++;
+        if (hora_actual > 23) {
+            hora_actual = 0;
+        }
+        ciclos = 0;
+        Serial.println(display);
+        actualiza_display();
+        delay(50);
+    }*/
+    /*if (ciclos==100) {
+        //Draw_Inverted_Filled_Circle(249,81,45);   
+        for (int i=0;i<27200;i++) {
+            ImageBW[i]=0xFF-ImageBW[i];
+        }
+        EPD_DisplayImage(ImageBW);
+        EPD_PartUpdate();     
+        Serial.print("@");
+        ciclos=0;
+    }
+    ciclos++;*/
     delay(10);
 }
 
@@ -73,3 +103,4 @@ Segunda pantalla con producción y consumo de las últimas 24 horas
 
 
 */
+

@@ -1,6 +1,8 @@
-#include "display_utils.h"
+#include <Arduino_JSON.h>
+#include <Arduino.h>
 #include "secrets.h"
 
+#include "display_utils.h"
 #include "EPD.h"
 #include <math.h>
 #include "sol.h"
@@ -8,33 +10,47 @@
 #include "escala.h"
 #include "flecha.h"
 #include "wificon.h"
-
+#include "gauge.h"
 #define DIA_ACTUAL 0
 #define ULTIMAS_24h 1
 
+#define IDIOMA_INGLES
 
-//uint8_t ImageBW[27200];
+#ifdef IDIOMA_ESPANOL
+    String produccion = "PRODUCCION";
+    String consumo =    "  CONSUMO ";
+    String sobran =     " CAPACIDAD ";
+
+    String titulo0 = "     ULTIMAS 24 HORAS     "; // 26 caracteres
+    String titulo1 = "           HOY            "; // 26 caracteres
+    String titulo2 = "       TIEMPO REAL        "; // 26 caracteres
+#endif
+
+#ifdef IDIOMA_INGLES
+    String produccion = "PRODUCTION";
+    String consumo =    "CONSUMPTION";
+    String sobran =     " CAPACITY ";
+
+    String titulo0 = " ENERGIA ULTIMAS 24 HORAS "; // 26 caracteres
+    String titulo1 = "          TODAY           "; // 26 caracteres
+    String titulo2 = "        REAL TIME         "; // 26 caracteres
+#endif
 
 // Variables relacionadas con los datos del JSON
 unsigned int v_produccion = 0;
 unsigned int v_consumo = 0;
-unsigned int v_margen = 0;
+unsigned int v_capacidad = 0;
 
 unsigned int v_potencia_contratada = 4600;
 unsigned int v_produccion_max = 5000;
 unsigned int v_consumo_max = v_produccion_max + v_potencia_contratada;
+unsigned int v_capacidad_min = 4000;
 
 String fecha = "";
 String hora = "";
 String horaAnterior ="00:00:00";
 String fechaAnterior = "01/01/2025";
 
-// IDIOMA ESPAÑOL
-String titulo0 = " ENERGIA ULTIMAS 24 HORAS "; // 26 caracteres
-String titulo1 = "       ENERGIA HOY        "; // 26 caracteres
-String titulo2 = "       TIEMPO REAL        "; // 26 caracteres
-//                012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
-// Define variables related to JSON data
 String jsonBuffer;
 int httpResponseCode;
 JSONVar myObject;
@@ -43,7 +59,6 @@ unsigned int display = 0;   // '0' for Wall Panel Home Assistant, '1' for openwe
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-
 
 //float produccion_acumulada[24] = {0}; // Producción acumulada por hora
 //float consumo_acumulado[24] = {0};    // Consumo acumulado por hora
@@ -104,161 +119,6 @@ void encabezado(String titulo) {
 }
 
 
-void actualiza_display_2() {
-    char buffer[50];
-
-        EPD_Clear(0, 0, 296, 128, WHITE);
-
-        encabezado(titulo2);
-        
-        snprintf(buffer, sizeof(buffer), "Produccion");
-        EPD_ShowString(0, 44, buffer, BLACK, 16);
-
-        snprintf(buffer, sizeof(buffer), "%u Wh", v_produccion);
-        EPD_ShowString(0, 62, buffer, BLACK, 16);
-
-        snprintf(buffer, sizeof(buffer), "Consumo");
-        EPD_ShowString(0, 88, buffer, BLACK, 16);
-        snprintf(buffer, sizeof(buffer), "%u Wh", v_consumo);
-        EPD_ShowString(0, 104, buffer, BLACK, 16);
-
-
-        EPD_ShowGauge(100-v_margen*100/(v_potencia_contratada+v_produccion));
-        
-        snprintf(buffer, sizeof(buffer), "Margen:", v_margen);
-        EPD_ShowString(150, 80, buffer, BLACK, 16);
-        snprintf(buffer, sizeof(buffer), "%uWh", v_margen);
-        EPD_ShowString(140, 100, buffer, BLACK, 24);
-
-        EPD_DisplayImage(ImageBW);
-        EPD_PartUpdate();
-
-
-}
-
-void actualiza_display_0() {
-    char buffer[50];
-    int x = 103;
-    int y1 = 12;
-    int y2 = 71;
-    int ancho = 192;
-    int alto = 48;
-    int anchocolumna = (ancho-24)/24;
-
-    float prod_total, cons_total;
-
-    prod_total = 0.0;
-    cons_total = 0.0;
-    for (int i = 0; i < 24; i++) {
-        prod_total += produccion_acumulada[i];
-        cons_total += consumo_acumulado[i];
-    }
-
-    //EPD_GPIOInit();
-    EPD_Clear(0, 0, 296, 128, WHITE);
-    encabezado(titulo0);
-    
-    EPD_ShowPicture(0, y1+10, 16, 16, gImage_sol, BLACK);
-    snprintf(buffer, sizeof(buffer), "%7.1fKWh", prod_total/1000);
-    EPD_ShowString(17, y1, buffer, BLACK, 12);
-    snprintf(buffer, sizeof(buffer), "%7.1fWh", produccion_acumulada[hora_actual]);
-    EPD_ShowString(17, y1+12, buffer, BLACK, 12);
-    snprintf(buffer, sizeof(buffer), "%7uW", v_produccion);
-    EPD_ShowString(17, y1+24, buffer, BLACK, 12);
-    EPD_DrawRectangle(0, y1, 80, 36, BLACK, WHITE);
-    EPD_ShowPicture(0, y1+38, 80, 5, gImage_escala, BLACK);
-    int xflecha = v_produccion*77/v_produccion_max;
-    if (xflecha > 77) xflecha = 77;
-    if (xflecha < 0) xflecha = 0;
-    EPD_ShowPicture(xflecha, y1+43, 8, 8, gImage_flecha, BLACK);
-    
-    EPD_ShowPicture(0, y2+10, 16, 22, gImage_enchufe, BLACK);
-    snprintf(buffer, sizeof(buffer), "%7.1fKWh", cons_total/1000);
-    EPD_ShowString(17, y2, buffer, BLACK, 12);
-    snprintf(buffer, sizeof(buffer), "%7.1fWh", consumo_acumulado[hora_actual]);
-    EPD_ShowString(17, y2+12, buffer, BLACK, 12);
-    snprintf(buffer, sizeof(buffer), "%7uW", v_consumo);
-    EPD_ShowString(17, y2+24, buffer, BLACK, 12);
-    EPD_DrawRectangle(0, y2, 80, 36, BLACK, WHITE);
-    EPD_ShowPicture(0, y2+38, 80, 5, gImage_escala, BLACK);
-    xflecha = v_consumo*77/v_consumo_max;
-    if (xflecha > 77) xflecha = 77;
-    if (xflecha < 0) xflecha = 0;
-    EPD_ShowPicture(xflecha, y2+43, 8, 8, gImage_flecha, BLACK);
-
-    EPD_DrawBarGraph(x, y1, ancho, alto, anchocolumna, 1, produccion_acumulada, ULTIMAS_24h);  
-    snprintf(buffer, sizeof(buffer), "-24h       -12h   %6.1fWh^", produccion_acumulada[hora_actual]);
-    EPD_ShowString(x, y1+alto+1, buffer, BLACK, 8);
-    EPD_DrawBarGraph(x, y2, ancho, alto, anchocolumna, 1, consumo_acumulado, ULTIMAS_24h);  
-    snprintf(buffer, sizeof(buffer), "-24h       -12h   %6.1fWh^", consumo_acumulado[hora_actual]);
-    EPD_ShowString(x, y2+alto+1, buffer, BLACK, 8);
-    
-    // Actualizar pantalla
-    EPD_DisplayImage(ImageBW);
-    EPD_PartUpdate();
-}
-
-void actualiza_display_1() {
-    char buffer[50];
-    int x = 103;
-    int y1 = 12;
-    int y2 = 71;
-    int ancho = 192;
-    int alto = 48;
-    int anchocolumna = (ancho-24)/24;
-
-    float prod_total, cons_total;
-
-    prod_total = 0.0;
-    cons_total = 0.0;
-    for (int i = 0; i <= hora_actual; i++) {
-        prod_total += produccion_acumulada[i];
-        cons_total += consumo_acumulado[i];
-    }
-
-    //EPD_GPIOInit();
-    EPD_Clear(0, 0, 296, 128, WHITE);
-    encabezado(titulo1);
-    
-    EPD_ShowPicture(0, y1+10, 16, 16, gImage_sol, BLACK);
-    snprintf(buffer, sizeof(buffer), "%7.1fKWh", prod_total/1000);
-    EPD_ShowString(17, y1, buffer, BLACK, 12);
-    snprintf(buffer, sizeof(buffer), "%7.1fWh", produccion_acumulada[hora_actual]);
-    EPD_ShowString(17, y1+12, buffer, BLACK, 12);
-    snprintf(buffer, sizeof(buffer), "%7uW", v_produccion);
-    EPD_ShowString(17, y1+24, buffer, BLACK, 12);
-    EPD_DrawRectangle(0, y1, 80, 36, BLACK, WHITE);
-    EPD_ShowPicture(0, y1+38, 80, 5, gImage_escala, BLACK);
-    int xflecha = v_produccion*77/v_produccion_max;
-    if (xflecha > 77) xflecha = 77;
-    if (xflecha < 0) xflecha = 0;
-    EPD_ShowPicture(xflecha, y1+43, 8, 8, gImage_flecha, BLACK);
-    
-    EPD_ShowPicture(0, y2+10, 16, 22, gImage_enchufe, BLACK);
-    snprintf(buffer, sizeof(buffer), "%7.1fKWh", cons_total/1000);
-    EPD_ShowString(17, y2, buffer, BLACK, 12);
-    snprintf(buffer, sizeof(buffer), "%7.1fWh", consumo_acumulado[hora_actual]);
-    EPD_ShowString(17, y2+12, buffer, BLACK, 12);
-    snprintf(buffer, sizeof(buffer), "%7uW", v_consumo);
-    EPD_ShowString(17, y2+24, buffer, BLACK, 12);
-    EPD_DrawRectangle(0, y2, 80, 36, BLACK, WHITE);
-    EPD_ShowPicture(0, y2+38, 80, 5, gImage_escala, BLACK);
-    xflecha = v_consumo*77/v_consumo_max;
-    if (xflecha > 77) xflecha = 77;
-    if (xflecha < 0) xflecha = 0;
-    EPD_ShowPicture(xflecha, y2+43, 8, 8, gImage_flecha, BLACK);
-
-    EPD_DrawBarGraph(x, y1, ancho, alto, anchocolumna, 1, produccion_acumulada, DIA_ACTUAL);  
-    snprintf(buffer, sizeof(buffer), "-24h       -12h   %6.1fWh^", produccion_acumulada[hora_actual]);
-    EPD_ShowString(x, y1+alto+1, buffer, BLACK, 8);
-    EPD_DrawBarGraph(x, y2, ancho, alto, anchocolumna, 1, consumo_acumulado, DIA_ACTUAL);  
-    snprintf(buffer, sizeof(buffer), "-24h       -12h   %6.1fWh^", consumo_acumulado[hora_actual]);
-    EPD_ShowString(x, y2+alto+1, buffer, BLACK, 8);
-    
-    // Actualizar pantalla
-    EPD_DisplayImage(ImageBW);
-    EPD_PartUpdate();
-};
     
 
 void obtenerFechaHora(String fechaCompleta, String &fecha, String &hora) {
@@ -322,75 +182,18 @@ void obtenerFechaHora(String fechaCompleta, String &fecha, String &hora) {
 void actualiza_display() {
     switch (display) {
         case 0:
-            actualiza_display_0();
+            actualiza_display_2();
             break;
         case 1:
             actualiza_display_1();
             break;
         case 2:
-            actualiza_display_2();
+            actualiza_display_0();
             break;
     }
 };
 
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-    char jsonPayload[length + 1];
-    memcpy(jsonPayload, payload, length);
-    jsonPayload[length] = '\0';
 
-    JSONVar myObject = JSON.parse(jsonPayload);
-    if (JSON.typeof(myObject) == "undefined") {
-        Serial.println("Error: JSON parsing failed!");
-        return;
-    }
-    
-
-    if (myObject.hasOwnProperty("pro")) {
-        v_produccion = int(myObject["pro"]);
-    }
-    if (myObject.hasOwnProperty("con")) {
-        v_consumo = int(myObject["con"]);
-    }
-    if (myObject.hasOwnProperty("fec")) {
-        obtenerFechaHora(myObject["fec"], fecha, hora);
-        hora_actual = hora.toInt();  // Convertir la hora a int
-    }
-        // Actualizar acumulados por hora
-    if (hora_actual != -1) {
-        // Si se detecta un cambio de hora, reiniciar los acumulados para la nueva hora
-        if (hora_actual != hora_anterior) {
-            produccion_acumulada[hora_actual] = 0.0;
-            consumo_acumulado[hora_actual] = 0.0;
-            hora_anterior = hora_actual;
-        }
-    }
-
-    consumo_acumulado[hora_actual] += integraEnergia(v_consumo,hora, horaAnterior);
-    produccion_acumulada[hora_actual] += integraEnergia(v_produccion, hora, horaAnterior);
-    mantenerHoraAnterior(fecha, hora, horaAnterior, fechaAnterior);
-
-    v_margen = v_potencia_contratada+v_produccion-v_consumo;
-
-
-    actualiza_display();
-}
-
-void reconnectMQTT() {
-    while (!client.connected()) {
-        Serial.print("Intentando conectar a MQTT...");
-        if (client.connect("ESP32Client", mqtt_user, mqtt_password)) {
-            Serial.println("Conectado a MQTT");
-            client.subscribe(mqtt_topic); // Suscribirse al tópico
-            Serial.print("Suscrito al tópico: ");
-            Serial.println(mqtt_topic);
-        } else {
-            Serial.print("Falló la conexión a MQTT, estado: ");
-            Serial.println(client.state());
-            Serial.println("Reintentando en 5 segundos...");
-            delay(5000);
-        }
-    }
-}
 
 
 void EPD_ShowGauge(uint8_t percentage) {
@@ -636,5 +439,390 @@ void mantenerHoraAnterior(String fecha, String hora, String &horaAnterior, Strin
         horaAnterior = "00:00:00";
     } else {
         horaAnterior = hora;
+    }
+}
+
+
+// Función auxiliar para rotar un punto alrededor de un centro
+void rotate_point(float cx, float cy, float angle, float *x, float *y) {
+    angle = angle * PI / 180.0; // Convertir a radianes
+    float s = sin(angle);
+    float c = cos(angle);
+
+    // Trasladar el punto al origen
+    float x_new = *x - cx;
+    float y_new = *y - cy;
+
+    // Aplicar la rotación
+    float x_rot = x_new * c - y_new * s;
+    float y_rot = x_new * s + y_new * c;
+
+    // Trasladar el punto de vuelta
+    *x = x_rot + cx;
+    *y = y_rot + cy;
+}
+
+// Función para determinar si un punto está dentro de un triángulo usando vectores cruzados
+int point_in_triangle(float px, float py, float x1, float y1, float x2, float y2, float x3, float y3) {
+    float v0x = x3 - x1;
+    float v0y = y3 - y1;
+    float v1x = x2 - x1;
+    float v1y = y2 - y1;
+    float v2x = px - x1;
+    float v2y = py - y1;
+
+    float dot00 = v0x * v0x + v0y * v0y;
+    float dot01 = v0x * v1x + v0y * v1y;
+    float dot02 = v0x * v2x + v0y * v2y;
+    float dot11 = v1x * v1x + v1y * v1y;
+    float dot12 = v1x * v2x + v1y * v2y;
+
+    float inv_denom = 1.0 / (dot00 * dot11 - dot01 * dot01);
+    float u = (dot11 * dot02 - dot01 * dot12) * inv_denom;
+    float v = (dot00 * dot12 - dot01 * dot02) * inv_denom;
+
+    return (u >= 0) && (v >= 0) && (u + v < 1);
+}
+
+// Función para dibujar un triángulo isósceles rotado
+void Draw_Isosceles_Triangle(uint16_t x, uint16_t y, uint16_t base, uint16_t height, float rotation_angle, uint8_t color, uint8_t fill) {
+    // Calcular los vértices del triángulo isósceles sin rotación
+    float x1 = x - base / 2.0; // Vértice izquierdo de la base
+    float y1 = y;
+    float x2 = x + base / 2.0; // Vértice derecho de la base
+    float y2 = y;
+    float x3 = x;              // Vértice superior (punta)
+    float y3 = y - height;
+
+    // Rotar los vértices alrededor del punto central del triángulo
+    rotate_point(x, y, rotation_angle, &x1, &y1);
+    rotate_point(x, y, rotation_angle, &x2, &y2);
+    rotate_point(x, y, rotation_angle, &x3, &y3);
+
+    if (fill) {
+        // Dibujar el triángulo relleno comprobando cada punto dentro del área
+        uint16_t min_x = (uint16_t)fmin(fmin(x1, x2), x3);
+        uint16_t max_x = (uint16_t)fmax(fmax(x1, x2), x3);
+        uint16_t min_y = (uint16_t)fmin(fmin(y1, y2), y3);
+        uint16_t max_y = (uint16_t)fmax(fmax(y1, y2), y3);
+
+        for (uint16_t py = min_y; py <= max_y; py++) {
+            for (uint16_t px = min_x; px <= max_x; px++) {
+                if (point_in_triangle(px, py, x1, y1, x2, y2, x3, y3)) {
+                    EPD_DrawPoint(px, py, color);
+                }
+            }
+        }
+    } else {
+        // Dibujar las líneas del triángulo
+        EPD_DrawLine((uint16_t)x1, (uint16_t)y1, (uint16_t)x2, (uint16_t)y2, color); // Línea base
+        EPD_DrawLine((uint16_t)x2, (uint16_t)y2, (uint16_t)x3, (uint16_t)y3, color); // Lado derecho
+        EPD_DrawLine((uint16_t)x3, (uint16_t)y3, (uint16_t)x1, (uint16_t)y1, color); // Lado izquierdo
+    }
+}
+
+uint8_t EPD_ReadPoint(uint16_t x, uint16_t y) {
+    uint16_t xpoint, ypoint;
+    uint32_t Addr;
+    uint8_t dat;
+
+    // Ajuste de coordenadas según orientación
+    switch (USE_HORIZONTIAL) {
+    case 0:
+        xpoint = EPD_H - y - 1;
+        ypoint = x;
+        break;
+    case 1:
+        xpoint = x;
+        ypoint = y;
+        break;
+    case 2:
+        xpoint = y;
+        ypoint = EPD_W - x - 1;
+        break;
+    case 3:
+        xpoint = EPD_W - x - 1;
+        ypoint = EPD_H - y - 1;
+        break;
+    default:
+        return 0; // Coordenadas fuera de rango
+    }
+
+    // Calcular la dirección de la memoria del píxel
+#if USE_HORIZONTIAL == 0 || USE_HORIZONTIAL == 2
+    Addr = xpoint / 8 + ypoint * ((EPD_H % 8 == 0) ? (EPD_H / 8) : (EPD_H / 8 + 1));
+#else
+    Addr = xpoint / 8 + ypoint * ((EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1));
+#endif
+
+    // Leer el byte correspondiente y obtener el bit
+    dat = ImageBW[Addr];
+    return (dat & (0x80 >> (xpoint % 8))) ? 1 : 0;
+}
+
+// Función para invertir el color de un píxel
+void EPD_InvertPoint(uint16_t x, uint16_t y) {
+    // Leer el color actual del píxel (0 o 1) y alternarlo
+    uint8_t current_color = EPD_ReadPoint(x, y);
+    uint8_t inverted_color = current_color ? 0 : 1;
+    EPD_DrawPoint(x, y, inverted_color);
+}
+
+// Función para dibujar un círculo sólido en negativo
+void Draw_Inverted_Filled_Circle(uint16_t x, uint16_t y, uint16_t radius) {
+    for (int16_t dy = -radius; dy <= radius; dy++) {
+        for (int16_t dx = -radius; dx <= radius; dx++) {
+            if (dx * dx + dy * dy <= radius * radius) {
+                EPD_InvertPoint(x + dx, y + dy);
+            }
+        }
+    }
+}
+
+
+
+
+void actualiza_display_2() {
+    char buffer[50];
+
+        EPD_Clear(0, 0, 296, 128, WHITE);
+        encabezado(titulo2);
+        
+        snprintf(buffer, sizeof(buffer), "%u Wh", v_produccion);
+        EPD_ShowString(0, 62, buffer, BLACK, 16);
+
+        snprintf(buffer, sizeof(buffer), "Consumo");
+        EPD_ShowString(0, 88, buffer, BLACK, 16);
+        snprintf(buffer, sizeof(buffer), "%u Wh", v_consumo);
+        EPD_ShowString(0, 104, buffer, BLACK, 16);
+
+        EPD_ShowPicture(0, 36, 96, 90, gImage_gauge, BLACK);
+        EPD_ShowPicture(102, 36, 96, 90, gImage_gauge, BLACK);
+        EPD_ShowPicture(204, 36, 96, 90, gImage_gauge, BLACK);
+
+        snprintf(buffer, sizeof(buffer), produccion.c_str());
+        EPD_ShowString(14, 24, buffer, BLACK, 12);
+        
+        int angulo = v_produccion*270/v_produccion_max-135;
+        Draw_Isosceles_Triangle(45, 81, 8, 40, angulo, BLACK, 1);
+        snprintf(buffer, sizeof(buffer), "%3u%%", v_produccion*100/v_produccion_max);
+        EPD_ShowString(32, 98, buffer, BLACK, 12);
+        snprintf(buffer, sizeof(buffer), "%5uW", v_produccion);
+        EPD_ShowString(26, 109, buffer, BLACK, 12);
+
+        snprintf(buffer, sizeof(buffer), consumo.c_str());
+        EPD_ShowString(116, 24, buffer, BLACK, 12);
+        
+        angulo = v_consumo*270/v_consumo_max-135;
+        Draw_Isosceles_Triangle(147, 81, 8, 40, angulo, BLACK, 1);
+        snprintf(buffer, sizeof(buffer), "%3u%%", v_consumo*100/v_consumo_max);
+        EPD_ShowString(132, 98, buffer, BLACK, 12);
+        snprintf(buffer, sizeof(buffer), "%5uW", v_consumo);
+        EPD_ShowString(128, 109, buffer, BLACK, 12);
+        
+        
+        snprintf(buffer, sizeof(buffer), sobran.c_str());
+        EPD_ShowString(218, 24, buffer, BLACK, 12);
+        
+        angulo = v_capacidad*270/(v_produccion+v_potencia_contratada)-135;
+        Draw_Isosceles_Triangle(249, 81, 8, 40, angulo, BLACK,1);
+        snprintf(buffer, sizeof(buffer), "%3u%%", v_capacidad*100/(v_produccion+v_potencia_contratada));
+        EPD_ShowString(236, 98, buffer, BLACK, 12);
+        snprintf(buffer, sizeof(buffer), "%5uW", v_capacidad);
+        EPD_ShowString(230, 109, buffer, BLACK, 12);
+
+
+        
+
+        EPD_DisplayImage(ImageBW);
+        EPD_PartUpdate();
+}
+
+void actualiza_display_0() {
+    char buffer[50];
+    int x = 103;
+    int y1 = 12;
+    int y2 = 71;
+    int ancho = 192;
+    int alto = 48;
+    int anchocolumna = (ancho-24)/24;
+
+    float prod_total, cons_total;
+
+    prod_total = 0.0;
+    cons_total = 0.0;
+    for (int i = 0; i < 24; i++) {
+        prod_total += produccion_acumulada[i];
+        cons_total += consumo_acumulado[i];
+    }
+
+    //EPD_GPIOInit();
+    EPD_Clear(0, 0, 296, 128, WHITE);
+    encabezado(titulo0);
+    
+    EPD_ShowPicture(0, y1+10, 16, 16, gImage_sol, BLACK);
+    snprintf(buffer, sizeof(buffer), "%7.1fKWh", prod_total/1000);
+    EPD_ShowString(17, y1, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7.1fWh", produccion_acumulada[hora_actual]);
+    EPD_ShowString(17, y1+12, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7uW", v_produccion);
+    EPD_ShowString(17, y1+24, buffer, BLACK, 12);
+    EPD_DrawRectangle(0, y1, 80, 36, BLACK, WHITE);
+    EPD_ShowPicture(0, y1+38, 80, 5, gImage_escala, BLACK);
+    int xflecha = v_produccion*77/v_produccion_max;
+    if (xflecha > 77) xflecha = 77;
+    if (xflecha < 0) xflecha = 0;
+    EPD_ShowPicture(xflecha, y1+43, 8, 8, gImage_flecha, BLACK);
+    
+    EPD_ShowPicture(0, y2+10, 16, 22, gImage_enchufe, BLACK);
+    snprintf(buffer, sizeof(buffer), "%7.1fKWh", cons_total/1000);
+    EPD_ShowString(17, y2, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7.1fWh", consumo_acumulado[hora_actual]);
+    EPD_ShowString(17, y2+12, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7uW", v_consumo);
+    EPD_ShowString(17, y2+24, buffer, BLACK, 12);
+    EPD_DrawRectangle(0, y2, 80, 36, BLACK, WHITE);
+    EPD_ShowPicture(0, y2+38, 80, 5, gImage_escala, BLACK);
+    xflecha = v_consumo*77/v_consumo_max;
+    if (xflecha > 77) xflecha = 77;
+    if (xflecha < 0) xflecha = 0;
+    EPD_ShowPicture(xflecha, y2+43, 8, 8, gImage_flecha, BLACK);
+
+    EPD_DrawBarGraph(x, y1, ancho, alto, anchocolumna, 1, produccion_acumulada, ULTIMAS_24h);  
+    EPD_DrawBarGraph(x, y2, ancho, alto, anchocolumna, 1, consumo_acumulado, ULTIMAS_24h);  
+
+    //snprintf(buffer, sizeof(buffer), "-24h       -12h   %6.1fWh^", produccion_acumulada[hora_actual]);
+    snprintf(buffer, sizeof(buffer), "-24h        -12h          ^");
+    EPD_ShowString(x, y1+alto+1, buffer, BLACK, 8);
+    
+    snprintf(buffer, sizeof(buffer), "-24h        -12h          ^");
+    EPD_ShowString(x, y2+alto+1, buffer, BLACK, 8);
+    
+    // Actualizar pantalla
+    EPD_DisplayImage(ImageBW);
+    EPD_PartUpdate();
+}
+
+void actualiza_display_1() {
+    char buffer[50];
+    char potencia[10];
+    int x = 103;
+    int y1 = 12;
+    int y2 = 71;
+    int ancho = 192;
+    int alto = 48;
+    int anchocolumna = (ancho-24)/24;
+    int posicion_insercion;
+
+    float prod_total, cons_total;
+
+    prod_total = 0.0;
+    cons_total = 0.0;
+    for (int i = 0; i <= hora_actual; i++) {
+        prod_total += produccion_acumulada[i];
+        cons_total += consumo_acumulado[i];
+    }
+
+    //EPD_GPIOInit();
+    EPD_Clear(0, 0, 296, 128, WHITE);
+    encabezado(titulo1);
+    
+    EPD_ShowPicture(0, y1+10, 16, 16, gImage_sol, BLACK);
+    snprintf(buffer, sizeof(buffer), "%7.1fKWh", prod_total/1000);
+    EPD_ShowString(17, y1, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7.1fWh", produccion_acumulada[hora_actual]);
+    EPD_ShowString(17, y1+12, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7uW", v_produccion);
+    EPD_ShowString(17, y1+24, buffer, BLACK, 12);
+    EPD_DrawRectangle(0, y1, 80, 36, BLACK, WHITE);
+    EPD_ShowPicture(0, y1+38, 80, 5, gImage_escala, BLACK);
+    int xflecha = v_produccion*77/v_produccion_max;
+    if (xflecha > 77) xflecha = 77;
+    if (xflecha < 0) xflecha = 0;
+    EPD_ShowPicture(xflecha, y1+43, 8, 8, gImage_flecha, BLACK);
+    
+    EPD_ShowPicture(0, y2+10, 16, 22, gImage_enchufe, BLACK);
+    snprintf(buffer, sizeof(buffer), "%7.1fKWh", cons_total/1000);
+    EPD_ShowString(17, y2, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7.1fWh", consumo_acumulado[hora_actual]);
+    EPD_ShowString(17, y2+12, buffer, BLACK, 12);
+    snprintf(buffer, sizeof(buffer), "%7uW", v_consumo);
+    EPD_ShowString(17, y2+24, buffer, BLACK, 12);
+    EPD_DrawRectangle(0, y2, 80, 36, BLACK, WHITE);
+    EPD_ShowPicture(0, y2+38, 80, 5, gImage_escala, BLACK);
+    xflecha = v_consumo*77/v_consumo_max;
+    if (xflecha > 77) xflecha = 77;
+    if (xflecha < 0) xflecha = 0;
+    EPD_ShowPicture(xflecha, y2+43, 8, 8, gImage_flecha, BLACK);
+
+    EPD_DrawBarGraph(x, y1, ancho, alto, anchocolumna, 1, produccion_acumulada, DIA_ACTUAL);  
+    EPD_DrawBarGraph(x, y2, ancho, alto, anchocolumna, 1, consumo_acumulado, DIA_ACTUAL);  
+                                     
+    snprintf(buffer, sizeof(buffer), "0h          12h          23h");
+    EPD_ShowString(x, y1+alto+1, buffer, BLACK, 8);
+    snprintf(buffer, sizeof(buffer), "0h          12h          23h");
+    EPD_ShowString(x, y2+alto+1, buffer, BLACK, 8);
+    // Actualizar pantalla
+    EPD_DisplayImage(ImageBW);
+    EPD_PartUpdate();
+};
+
+
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    char jsonPayload[length + 1];
+    memcpy(jsonPayload, payload, length);
+    jsonPayload[length] = '\0';
+
+    JSONVar myObject = JSON.parse(jsonPayload);
+    if (JSON.typeof(myObject) == "undefined") {
+        Serial.println("Error: JSON parsing failed!");
+        return;
+    }
+
+    if (myObject.hasOwnProperty("pro")) {
+        v_produccion = int(myObject["pro"]);
+    }
+    if (myObject.hasOwnProperty("con")) {
+        v_consumo = int(myObject["con"]);
+    }
+    if (myObject.hasOwnProperty("fec")) {
+        obtenerFechaHora(myObject["fec"], fecha, hora);
+        hora_actual = hora.toInt();  // Convertir la hora a int
+    }
+        // Actualizar acumulados por hora
+    if (hora_actual != -1) {
+        // Si se detecta un cambio de hora, reiniciar los acumulados para la nueva hora
+        if (hora_actual != hora_anterior) {
+            produccion_acumulada[hora_actual] = 0.0;
+            consumo_acumulado[hora_actual] = 0.0;
+            hora_anterior = hora_actual;
+        }
+    }
+
+    consumo_acumulado[hora_actual] += integraEnergia(v_consumo,hora, horaAnterior);
+    produccion_acumulada[hora_actual] += integraEnergia(v_produccion, hora, horaAnterior);
+    mantenerHoraAnterior(fecha, hora, horaAnterior, fechaAnterior);
+
+    v_capacidad = v_potencia_contratada+v_produccion-v_consumo;
+    if (v_capacidad<0)  v_capacidad = 0;
+
+    actualiza_display();
+}
+
+void reconnectMQTT() {
+    while (!client.connected()) {
+        Serial.print("Intentando conectar a MQTT...");
+        if (client.connect("ESP32Client", mqtt_user, mqtt_password)) {
+            Serial.println("Conectado a MQTT");
+            client.subscribe(mqtt_topic); // Suscribirse al tópico
+            Serial.print("Suscrito al tópico: ");
+            Serial.println(mqtt_topic);
+        } else {
+            Serial.print("Falló la conexión a MQTT, estado: ");
+            Serial.println(client.state());
+            Serial.println("Reintentando en 5 segundos...");
+            delay(5000);
+        }
     }
 }
