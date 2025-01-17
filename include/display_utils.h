@@ -34,9 +34,9 @@ void EPD_DrawRectangle(uint16_t x, uint16_t y, uint16_t width, uint16_t height, 
 void rotate_point(float cx, float cy, float angle, float *x, float *y);
 void Draw_Isosceles_Triangle(uint16_t x, uint16_t y, uint16_t base, uint16_t height, float rotation_angle, uint8_t color, uint8_t fill);
 int point_in_triangle(float px, float py, float x1, float y1, float x2, float y2, float x3, float y3);
-void Draw_Inverted_Filled_Circle(uint16_t x, uint16_t y, uint16_t radius);
-void EPD_InvertPoint(uint16_t x, uint16_t y);
-uint8_t EPD_ReadPoint(uint16_t x, uint16_t y)  ;
+uint8_t EPD_GetPixel (int x, int y);
+void EPD_InvertPoint (int x, int y);
+void invierte_circulo(int x, int y, int r);
 
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void reconnectMQTT();

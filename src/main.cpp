@@ -5,6 +5,7 @@
 int ciclos = 0;
 extern unsigned int display;
 extern int hora_actual;
+extern int alerta_capacidad;
 
 void setup() {
     Serial.begin(115200); // Inicializar el puerto serie
@@ -78,29 +79,16 @@ void loop() {
         actualiza_display();
         delay(50);
     }*/
-    /*if (ciclos==100) {
-        //Draw_Inverted_Filled_Circle(249,81,45);   
-        for (int i=0;i<27200;i++) {
-            ImageBW[i]=0xFF-ImageBW[i];
+    if (alerta_capacidad) {
+        if (ciclos==20) {
+            invierte_circulo(249, 81, 44);
+
+            EPD_DisplayImage(ImageBW);
+            EPD_PartUpdate();
+            Serial.print("@");
+            ciclos=0;
         }
-        EPD_DisplayImage(ImageBW);
-        EPD_PartUpdate();     
-        Serial.print("@");
-        ciclos=0;
+        ciclos++;
     }
-    ciclos++;*/
     delay(10);
 }
-
-/* MEJORAS
-Justificar los números para que cuando tengan menos dígitos ocupen lo mismo
-
-Si el consumo supera producción+4600 el margen debe quedar a 0, no con
-números negativos
-
-Parpadeo cuando el margen sea inferior a 1000W
-Segunda pantalla con producción y consumo de las últimas 24 horas
-
-
-*/
-

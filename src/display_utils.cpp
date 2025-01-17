@@ -11,10 +11,11 @@
 #include "flecha.h"
 #include "wificon.h"
 #include "gauge.h"
+
 #define DIA_ACTUAL 0
 #define ULTIMAS_24h 1
 
-#define IDIOMA_INGLES
+#define IDIOMA_ESPANOL
 
 #ifdef IDIOMA_ESPANOL
     String produccion = "PRODUCCION";
@@ -40,11 +41,13 @@
 unsigned int v_produccion = 0;
 unsigned int v_consumo = 0;
 unsigned int v_capacidad = 0;
+int alerta_capacidad=0;
 
 unsigned int v_potencia_contratada = 4600;
 unsigned int v_produccion_max = 5000;
-unsigned int v_consumo_max = v_produccion_max + v_potencia_contratada;
 unsigned int v_capacidad_min = 4000;
+
+unsigned int v_consumo_max = v_produccion_max + v_potencia_contratada;
 
 String fecha = "";
 String hora = "";
@@ -521,67 +524,6 @@ void Draw_Isosceles_Triangle(uint16_t x, uint16_t y, uint16_t base, uint16_t hei
     }
 }
 
-uint8_t EPD_ReadPoint(uint16_t x, uint16_t y) {
-    uint16_t xpoint, ypoint;
-    uint32_t Addr;
-    uint8_t dat;
-
-    // Ajuste de coordenadas según orientación
-    switch (USE_HORIZONTIAL) {
-    case 0:
-        xpoint = EPD_H - y - 1;
-        ypoint = x;
-        break;
-    case 1:
-        xpoint = x;
-        ypoint = y;
-        break;
-    case 2:
-        xpoint = y;
-        ypoint = EPD_W - x - 1;
-        break;
-    case 3:
-        xpoint = EPD_W - x - 1;
-        ypoint = EPD_H - y - 1;
-        break;
-    default:
-        return 0; // Coordenadas fuera de rango
-    }
-
-    // Calcular la dirección de la memoria del píxel
-#if USE_HORIZONTIAL == 0 || USE_HORIZONTIAL == 2
-    Addr = xpoint / 8 + ypoint * ((EPD_H % 8 == 0) ? (EPD_H / 8) : (EPD_H / 8 + 1));
-#else
-    Addr = xpoint / 8 + ypoint * ((EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1));
-#endif
-
-    // Leer el byte correspondiente y obtener el bit
-    dat = ImageBW[Addr];
-    return (dat & (0x80 >> (xpoint % 8))) ? 1 : 0;
-}
-
-// Función para invertir el color de un píxel
-void EPD_InvertPoint(uint16_t x, uint16_t y) {
-    // Leer el color actual del píxel (0 o 1) y alternarlo
-    uint8_t current_color = EPD_ReadPoint(x, y);
-    uint8_t inverted_color = current_color ? 0 : 1;
-    EPD_DrawPoint(x, y, inverted_color);
-}
-
-// Función para dibujar un círculo sólido en negativo
-void Draw_Inverted_Filled_Circle(uint16_t x, uint16_t y, uint16_t radius) {
-    for (int16_t dy = -radius; dy <= radius; dy++) {
-        for (int16_t dx = -radius; dx <= radius; dx++) {
-            if (dx * dx + dy * dy <= radius * radius) {
-                EPD_InvertPoint(x + dx, y + dy);
-            }
-        }
-    }
-}
-
-
-
-
 void actualiza_display_2() {
     char buffer[50];
 
@@ -631,11 +573,79 @@ void actualiza_display_2() {
         snprintf(buffer, sizeof(buffer), "%5uW", v_capacidad);
         EPD_ShowString(230, 109, buffer, BLACK, 12);
 
-
-        
+        //invierte_circulo(249, 81, 45);
 
         EPD_DisplayImage(ImageBW);
         EPD_PartUpdate();
+}
+
+uint8_t EPD_ReadPoint(uint16_t x, uint16_t y)
+{
+    uint8_t dat;
+    uint16_t xpoint, ypoint;
+    uint32_t Addr;
+
+    // Transform coordinates based on the display orientation
+    switch (USE_HORIZONTIAL)
+    {
+    case 0:
+        xpoint = EPD_H - y - 1;
+        ypoint = x;
+        break;
+    case 1:
+        xpoint = x;
+        ypoint = y;
+        break;
+    case 2:
+        xpoint = y;
+        ypoint = EPD_W - x - 1;
+        break;
+    case 3:
+        xpoint = EPD_W - x - 1;
+        ypoint = EPD_H - y - 1;
+        break;
+    default:
+        return 0; // Return 0 if an invalid orientation is set
+    }
+
+    // Calculate the address of the pixel in the buffer
+#if USE_HORIZONTIAL == 0 | USE_HORIZONTIAL == 2
+    Addr = xpoint / 8 + ypoint * ((EPD_H % 8 == 0) ? (EPD_H / 8) : (EPD_H / 8 + 1));
+#else
+    Addr = xpoint / 8 + ypoint * ((EPD_W % 8 == 0) ? (EPD_W / 8) : (EPD_W / 8 + 1));
+#endif
+
+    // Read the byte from the buffer
+    dat = ImageBW[Addr];
+
+    // Check the specific bit for the pixel
+    if (dat & (0x80 >> (xpoint % 8)))
+    {
+        return BLACK; // Return BLACK if the bit is set
+    }
+    else
+    {
+        return WHITE; // Return WHITE if the bit is not set
+    }
+}
+
+void EPD_InvertPoint (int x, int y) {
+    uint16_t x1 = x;
+    uint16_t y1 = y;
+    uint16_t x2 = x;
+    uint16_t y2 = y;
+    EPD_DrawPoint(x1, y1, !EPD_ReadPoint(x1, y1));
+}
+
+// función que invierte los píxeles de un círculo con centro en (x, y) y radio r
+void invierte_circulo(int x, int y, int r) {
+    for (int dy = -r; dy <= r; dy++) {
+        for (int dx = -r; dx <= r; dx++) {
+            if (dx*dx + dy*dy <= r*r) {
+                EPD_InvertPoint(x + dx, y + dy);
+            }
+        }
+    }
 }
 
 void actualiza_display_0() {
@@ -806,6 +816,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
     v_capacidad = v_potencia_contratada+v_produccion-v_consumo;
     if (v_capacidad<0)  v_capacidad = 0;
+    alerta_capacidad =  (v_capacidad<v_capacidad_min);
 
     actualiza_display();
 }
