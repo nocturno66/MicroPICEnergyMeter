@@ -45,7 +45,7 @@ int alerta_capacidad=0;
 
 unsigned int v_potencia_contratada = 4600;
 unsigned int v_produccion_max = 5000;
-unsigned int v_capacidad_min = 4000;
+unsigned int v_capacidad_min = 1000;
 
 unsigned int v_consumo_max = v_produccion_max + v_potencia_contratada;
 
