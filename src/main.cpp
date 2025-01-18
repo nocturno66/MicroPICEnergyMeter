@@ -128,7 +128,7 @@ void loop() {
     if (digitalRead(2) == 0) {
         Serial.print ("Display tipo:");
         display++;
-        if (display > 3) {
+        if (display > 4) {
             display = 1;
         }
         ciclos = 0;

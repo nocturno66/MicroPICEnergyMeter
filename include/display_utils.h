@@ -8,6 +8,26 @@
 #include <PubSubClient.h>
 #include "secrets.h"
 
+#define PIN_ENABLE  7
+#define PIN_EXIT    1
+#define PIN_MENU    2
+#define PIN_DOWN    4
+#define PIN_CONF    5
+#define PIN_UP      6
+
+typedef enum {
+    MENU_LANGUAGE = 0,
+    MENU_POWER,
+    MENU_MAX_PRODUCTION,
+    MENU_MIN_CAPACITY,
+    MENU_OPTIONS_COUNT
+} MenuOption;
+
+typedef enum {
+    LANGUAGE_SPANISH = 0,
+    LANGUAGE_ENGLISH
+} Language;
+
 extern uint8_t ImageBW[27200];
 
 // Variables relacionadas con los datos del JSON
@@ -46,5 +66,12 @@ void display_tiempo_real();
 void display_hoy();
 void display_ultimas24h();
 void actualiza_display();
+
+void display_menu();
+void ProcessSelectedOption();
+void UpdateMenuSelection();
+void DrawMenu(MenuOption selectedOption);
+
+
 
 #endif // DISPLAY_UTILS_H

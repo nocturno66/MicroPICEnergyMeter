@@ -77,8 +77,10 @@ float consumo_acumulado[24] = {200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 
 int hora_anterior = -1; // Para detectar cambios de hora
 int hora_actual = -1;
 
-
-
+// Variables globales
+MenuOption currentOption = MENU_LANGUAGE;
+bool optionSelected = false;
+Language currentLanguage = LANGUAGE_SPANISH;
 
 
 /***************************************************************************************************************************/
@@ -233,14 +235,14 @@ void mantenerHoraAnterior(String fecha, String hora, String &horaAnterior, Strin
 
 void inicializa_display() {
     // Set the screen power pin to output mode and set it to high level to turn on the power
-    pinMode(7, OUTPUT);  // Set GPIO 7 to output mode
-    digitalWrite(7, HIGH);  // Set GPIO 7 to high level to turn on the power
+    pinMode(PIN_ENABLE, OUTPUT);  // Set GPIO 7 to output mode
+    digitalWrite(PIN_ENABLE, HIGH);  // Set GPIO 7 to high level to turn on the power
 
-    pinMode(1, INPUT);  // Set GPIO 1 to input mode EXIT
-    pinMode(2, INPUT);  // Set GPIO 2 to input mode MENU
-    pinMode(4, INPUT);  // Set GPIO 4 to input mode DOWN
-    pinMode(5, INPUT);  // Set GPIO 5 to input mode CONF
-    pinMode(6, INPUT);  // Set GPIO 6 to input mode UP
+    pinMode(PIN_EXIT, INPUT);  // Set GPIO 1 to input mode EXIT
+    pinMode(PIN_MENU, INPUT);  // Set GPIO 2 to input mode MENU
+    pinMode(PIN_DOWN, INPUT);  // Set GPIO 4 to input mode DOWN
+    pinMode(PIN_CONF, INPUT);  // Set GPIO 5 to input mode CONF
+    pinMode(PIN_UP, INPUT);  // Set GPIO 6 to input mode UP
 
     EPD_Init();
     EPD_Clear(0, 0, 296, 128, WHITE);
@@ -619,23 +621,18 @@ void actualiza_display() {
         case 3:
             display_ultimas24h();
             break;
+        case 4:
+            display_menu();
+            break;
     }
 };
 
-
-
 void display_micropic() {
-    char buffer[50];
-    int angulo;
-
-        EPD_Clear(0, 0, 296, 128, WHITE);
-                
-        EPD_ShowPicture(0, 0, 296, 128, gImage_Micropic, BLACK);
-        
-        EPD_DisplayImage(ImageBW);
-        EPD_PartUpdate();
+    EPD_Clear(0, 0, 296, 128, WHITE);
+    EPD_ShowPicture(0, 0, 296, 128, gImage_Micropic, BLACK);
+    EPD_DisplayImage(ImageBW);
+    EPD_PartUpdate();
 }
-
 
 void display_tiempo_real() {
     char buffer[50];
@@ -925,5 +922,90 @@ void reconnectMQTT() {
             Serial.println("Reintentando en 5 segundos...");
             delay(5000);
         }
+    }
+}
+
+
+
+
+void DrawMenu(MenuOption selectedOption) {
+    // Limpia la pantalla
+    EPD_Clear(0, 0, 296, 128, WHITE);
+
+    // Muestra las opciones de menú
+    EPD_ShowString(10, 10, "Idioma", (selectedOption == MENU_LANGUAGE) ? WHITE : BLACK, 16);
+    EPD_ShowString(150, 10, (currentLanguage == LANGUAGE_SPANISH) ? "Castellano" : "English", BLACK, 16);
+    EPD_ShowString(10, 30, "Potencia Contratada", (selectedOption == MENU_POWER) ? WHITE : BLACK, 16);
+    EPD_ShowString(10, 50, "Produccion Maxima", (selectedOption == MENU_MAX_PRODUCTION) ? WHITE : BLACK, 16);
+    EPD_ShowString(10, 70, "Capacidad Minima", (selectedOption == MENU_MIN_CAPACITY) ? WHITE : BLACK, 16);
+    
+    EPD_DisplayImage(ImageBW);
+    EPD_PartUpdate();
+}
+
+void UpdateMenuSelection() {
+    if (digitalRead(PIN_UP) == 0) {
+        // Mueve la selección hacia arriba
+        currentOption = (currentOption == MENU_LANGUAGE) ? (MenuOption)(MENU_OPTIONS_COUNT - 1) : (MenuOption)(currentOption - 1);
+        while (digitalRead(PIN_UP) == 0); // Espera a que se suelte el botón
+        DrawMenu(currentOption);
+    }
+    if (digitalRead(PIN_DOWN) == 0) {
+        // Mueve la selección hacia abajo
+        currentOption = (MenuOption)((currentOption + 1) % MENU_OPTIONS_COUNT);
+        while (digitalRead(PIN_DOWN) == 0); // Espera a que se suelte el botón
+        DrawMenu(currentOption);
+    }
+    if (digitalRead(PIN_CONF) == 0) {
+        if (currentOption == MENU_LANGUAGE) {
+            // Alternar idioma
+            currentLanguage = (currentLanguage == LANGUAGE_SPANISH) ? LANGUAGE_ENGLISH : LANGUAGE_SPANISH;
+            DrawMenu(currentOption);
+        } else {
+            // Marca la opción como seleccionada
+            optionSelected = true;
+        }
+        while (digitalRead(PIN_CONF) == 0); // Espera a que se suelte el botón
+    }
+}
+
+void ProcessSelectedOption() {
+    switch (currentOption) {
+        case MENU_LANGUAGE:
+            // Código para configurar el idioma
+            EPD_ShowString(10, 100, "Configurar Idioma", BLACK, 16);
+            break;
+        case MENU_POWER:
+            // Código para configurar la potencia contratada
+            EPD_ShowString(10, 100, "Configurar Potencia", BLACK, 16);
+            break;
+        case MENU_MAX_PRODUCTION:
+            // Código para configurar la producción máxima
+            EPD_ShowString(10, 100, "Configurar Produccion", BLACK, 16);
+            break;
+        case MENU_MIN_CAPACITY:
+            // Código para configurar la capacidad mínima
+            EPD_ShowString(10, 100, "Configurar Capacidad", BLACK, 16);
+            break;
+        default:
+            break;
+    }
+}
+
+void display_menu() {
+    // Dibuja el menú inicial
+    DrawMenu(currentOption);
+
+    while (true) {
+        UpdateMenuSelection();
+
+        if (optionSelected) {
+            ProcessSelectedOption();
+            optionSelected = false;
+            delay(2000); // Tiempo para mostrar la configuración antes de volver al menú
+            DrawMenu(currentOption);
+        }
+
+        delay(100); // Para evitar lecturas continuas excesivas
     }
 }
