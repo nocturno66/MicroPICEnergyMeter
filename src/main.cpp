@@ -16,11 +16,13 @@ unsigned int v_potencia_contratada = 0;
 unsigned int v_produccion_max = 0;
 unsigned int v_capacidad_min = 0;
 unsigned int v_consumo_max = 0;
+extern Language currentLanguage ;
 
 // Claves para cada variable
 #define KEY_POTENCIA "potencia"
 #define KEY_PRODUCCION "produccion"
 #define KEY_CAPACIDAD "capacidad"
+#define KEY_IDIOMA "idioma"
 
 // Función para inicializar la NVS
 void initNVS() {
@@ -36,11 +38,14 @@ void readFromNVS() {
     v_potencia_contratada = preferences.getUInt(KEY_POTENCIA, v_potencia_contratada);
     v_produccion_max = preferences.getUInt(KEY_PRODUCCION, v_produccion_max);
     v_capacidad_min = preferences.getUInt(KEY_CAPACIDAD, v_capacidad_min);
+    // leer el idioma de la NVS
+    currentLanguage = (Language)preferences.getUInt(KEY_IDIOMA, currentLanguage);
 
     Serial.println("Valores leídos de la NVS:");
     Serial.printf("Potencia contratada: %u\n", v_potencia_contratada);
     Serial.printf("Producción máxima: %u\n", v_produccion_max);
     Serial.printf("Capacidad mínima: %u\n", v_capacidad_min);
+    Serial.printf("Idioma: %u\n", currentLanguage);
 }
 
 // Función para guardar las variables en la NVS
@@ -48,7 +53,8 @@ void saveToNVS() {
     preferences.putUInt(KEY_POTENCIA, v_potencia_contratada);
     preferences.putUInt(KEY_PRODUCCION, v_produccion_max);
     preferences.putUInt(KEY_CAPACIDAD, v_capacidad_min);
-
+    // guardar el idioma en la NVS
+    preferences.putUInt(KEY_IDIOMA, currentLanguage);
     Serial.println("Valores guardados en la NVS");
 }
 
@@ -115,55 +121,55 @@ void setup() {
 
     // Cerrar la NVS si ya no la necesitas
     closeNVS();
+    UpdateLanguageTexts();
     display++;
 }
-
 void loop() {
+    static unsigned long lastPressTime = 0;
+    static bool longPressDetected = false;
+
     if (!client.connected()) {
         reconnectMQTT();
     }
     client.loop(); // Procesar mensajes entrantes de MQTT
 
-        
     if (digitalRead(PIN_MENU) == 0) {
-        Serial.print ("Display tipo:");
-        display++;
-        if (display > 4) {
-            display = 1;
+        unsigned long currentPressTime = millis();
+
+        if (lastPressTime == 0) {
+            // Primera detección de pulsación
+            lastPressTime = currentPressTime;
+        } else if (!longPressDetected && (currentPressTime - lastPressTime > 2000)) {
+            // Detecta pulsación larga (> 2 segundos)
+            display = 4;
+            Serial.println("Display tipo: 4 (pulsación larga)");
+            actualiza_display();
+            longPressDetected = true;
         }
-        ciclos = 0;
-        Serial.println(display);
-        actualiza_display();
-        delay(50);
+    } else {
+        if (lastPressTime != 0 && !longPressDetected) {
+            // Detecta pulsación corta
+            display++;
+            if (display > 3) {
+                display = 1;
+            }
+            Serial.print("Display tipo: ");
+            Serial.println(display);
+            actualiza_display();
+        }
+        // Restablece el estado
+        lastPressTime = 0;
+        longPressDetected = false;
     }
-    /*if (digitalRead(4) == 0) {
-        hora_actual--;
-        if (hora_actual < 0) {
-            hora_actual = 23;
-        }
-        ciclos = 0;
-        Serial.println(display);
-        actualiza_display();
-        delay(50);
-    }
-    if (digitalRead(6) == 0) {
-        hora_actual++;
-        if (hora_actual > 23) {
-            hora_actual = 0;
-        }
-        ciclos = 0;
-        Serial.println(display);
-        actualiza_display();
-        delay(50);
-    }*/
+
     if (alerta_capacidad) {
-        if (ciclos==20) {
+        if (ciclos == 20) {
             invierte_circulo(249, 81, 44);
 
             EPD_DisplayImage(ImageBW);
             EPD_PartUpdate();
             Serial.print("@");
-            ciclos=0;
+            ciclos = 0;
         }
         ciclos++;
     }

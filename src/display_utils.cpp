@@ -12,6 +12,7 @@
 #include "wificon.h"
 #include "gauge.h"
 #include "micropic.h"
+#include "main.h"
 
 #define DIA_ACTUAL 0
 #define ULTIMAS_24h 1
@@ -946,6 +947,10 @@ void UpdateMenuSelection(bool &editingValue, bool &exitMenu) {
         if (editingValue) {
             // Incrementa el valor de la variable seleccionada
             switch (currentOption) {
+                case MENU_LANGUAGE:
+                    currentLanguage = (currentLanguage == LANGUAGE_SPANISH) ? LANGUAGE_ENGLISH : LANGUAGE_SPANISH;
+                    UpdateLanguageTexts();
+                    break;
                 case MENU_POWER:
                     v_potencia_contratada = min(v_potencia_contratada + 100, 99000);
                     break;
@@ -969,6 +974,10 @@ void UpdateMenuSelection(bool &editingValue, bool &exitMenu) {
         if (editingValue) {
             // Decrementa el valor de la variable seleccionada
             switch (currentOption) {
+                case MENU_LANGUAGE:
+                    currentLanguage = (currentLanguage == LANGUAGE_SPANISH) ? LANGUAGE_ENGLISH : LANGUAGE_SPANISH;
+                    UpdateLanguageTexts();
+                    break;
                 case MENU_POWER:
                     v_potencia_contratada = max(v_potencia_contratada - 100, 0);
                     break;
@@ -989,11 +998,7 @@ void UpdateMenuSelection(bool &editingValue, bool &exitMenu) {
         DrawMenu(currentOption, editingValue);
     }
     if (digitalRead(PIN_MENU) == 0 && !editingValue) {
-        if (currentOption == MENU_LANGUAGE) {
-            // Alternar idioma
-            currentLanguage = (currentLanguage == LANGUAGE_SPANISH) ? LANGUAGE_ENGLISH : LANGUAGE_SPANISH;
-            UpdateLanguageTexts();
-        } else if (currentOption == MENU_EXIT) {
+        if (currentOption == MENU_EXIT) {
             // Guardar la configuración y salir del menú
             exitMenu = true;
             } else {
@@ -1019,12 +1024,18 @@ void display_menu() {
     bool editingValue = false;
     bool exitMenu = false;
     DrawMenu(currentOption, editingValue);
-
+    // espera a que suelte la tecla CONF
+    while (digitalRead(PIN_MENU) == 0);
     while (!exitMenu) {
         UpdateMenuSelection(editingValue, exitMenu);
-        Serial.println("Esperando selección de opción...");
         delay(100); // Para evitar lecturas continuas excesivas
     }
+    initNVS();
+    saveToNVS();
+    //delay(1000); // Para evitar múltiples pulsaciones
+    readFromNVS();
+    //delay(1000); // Para evitar múltiples pulsaciones
+    closeNVS();
     display = 1;
 }
 
