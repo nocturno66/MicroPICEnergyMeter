@@ -125,7 +125,7 @@ void loop() {
     client.loop(); // Procesar mensajes entrantes de MQTT
 
         
-    if (digitalRead(2) == 0) {
+    if (digitalRead(PIN_MENU) == 0) {
         Serial.print ("Display tipo:");
         display++;
         if (display > 4) {

@@ -16,27 +16,6 @@
 #define DIA_ACTUAL 0
 #define ULTIMAS_24h 1
 
-#define IDIOMA_ESPANOL
-
-#ifdef IDIOMA_ESPANOL
-    String produccion = "PRODUCCION";
-    String consumo =    "  CONSUMO ";
-    String sobran =     " CAPACIDAD ";
-
-    String titulo0 = "     ULTIMAS 24 HORAS     "; // 26 caracteres
-    String titulo1 = "           HOY            "; // 26 caracteres
-    String titulo2 = "       TIEMPO REAL        "; // 26 caracteres
-#endif
-
-#ifdef IDIOMA_INGLES
-    String produccion = "PRODUCTION";
-    String consumo =    "CONSUMPTION";
-    String sobran =     " CAPACITY ";
-
-    String titulo0 = " ENERGIA ULTIMAS 24 HORAS "; // 26 caracteres
-    String titulo1 = "          TODAY           "; // 26 caracteres
-    String titulo2 = "        REAL TIME         "; // 26 caracteres
-#endif
 
 /***************************************************************************************************************************/
 /***************************************************************************************************************************/
@@ -81,6 +60,11 @@ int hora_actual = -1;
 MenuOption currentOption = MENU_LANGUAGE;
 bool optionSelected = false;
 Language currentLanguage = LANGUAGE_SPANISH;
+
+// Textos dinámicos
+String menuLanguage, menuPower, menuMaxProduction, menuMinCapacity;
+String produccion, consumo, sobran, titulo0, titulo1, titulo2;
+
 
 
 /***************************************************************************************************************************/
@@ -925,20 +909,28 @@ void reconnectMQTT() {
     }
 }
 
-
-
-
 void DrawMenu(MenuOption selectedOption) {
+    char buffer[10];
     // Limpia la pantalla
     EPD_Clear(0, 0, 296, 128, WHITE);
 
     // Muestra las opciones de menú
-    EPD_ShowString(10, 10, "Idioma", (selectedOption == MENU_LANGUAGE) ? WHITE : BLACK, 16);
-    EPD_ShowString(150, 10, (currentLanguage == LANGUAGE_SPANISH) ? "Castellano" : "English", BLACK, 16);
-    EPD_ShowString(10, 30, "Potencia Contratada", (selectedOption == MENU_POWER) ? WHITE : BLACK, 16);
-    EPD_ShowString(10, 50, "Produccion Maxima", (selectedOption == MENU_MAX_PRODUCTION) ? WHITE : BLACK, 16);
-    EPD_ShowString(10, 70, "Capacidad Minima", (selectedOption == MENU_MIN_CAPACITY) ? WHITE : BLACK, 16);
-    
+    EPD_ShowString (0,0, "MicroPIC MQTT Energy Meter - SETUP", BLACK, 16);
+    EPD_ShowString(10, 20, menuLanguage.c_str(), (selectedOption == MENU_LANGUAGE) ? WHITE : BLACK, 16);
+    EPD_ShowString(170, 20, (currentLanguage == LANGUAGE_SPANISH) ? "Castellano" : "English", BLACK, 16);
+    EPD_ShowString(10, 40, menuPower.c_str(), (selectedOption == MENU_POWER) ? WHITE : BLACK, 16);
+    sprintf(buffer, "%d", v_potencia_contratada);
+    EPD_ShowString(170, 40, buffer, BLACK, 16);
+
+    EPD_ShowString(10, 60, menuMaxProduction.c_str(), (selectedOption == MENU_MAX_PRODUCTION) ? WHITE : BLACK, 16);
+    sprintf(buffer, "%d", v_produccion_max);
+    EPD_ShowString(170, 60, buffer, BLACK, 16);
+
+    EPD_ShowString(10, 80, menuMinCapacity.c_str(), (selectedOption == MENU_MIN_CAPACITY) ? WHITE : BLACK, 16);
+    sprintf(buffer, "%d", v_capacidad_min);
+    EPD_ShowString(170, 80, buffer, BLACK, 16);
+
+    // Actualizar pantalla
     EPD_DisplayImage(ImageBW);
     EPD_PartUpdate();
 }
@@ -956,16 +948,17 @@ void UpdateMenuSelection() {
         while (digitalRead(PIN_DOWN) == 0); // Espera a que se suelte el botón
         DrawMenu(currentOption);
     }
-    if (digitalRead(PIN_CONF) == 0) {
+    if (digitalRead(PIN_MENU) == 0) {
         if (currentOption == MENU_LANGUAGE) {
             // Alternar idioma
             currentLanguage = (currentLanguage == LANGUAGE_SPANISH) ? LANGUAGE_ENGLISH : LANGUAGE_SPANISH;
+            UpdateLanguageTexts();
             DrawMenu(currentOption);
         } else {
             // Marca la opción como seleccionada
             optionSelected = true;
         }
-        while (digitalRead(PIN_CONF) == 0); // Espera a que se suelte el botón
+        while (digitalRead(PIN_MENU) == 0); // Espera a que se suelte el botón
     }
 }
 
@@ -993,19 +986,57 @@ void ProcessSelectedOption() {
 }
 
 void display_menu() {
+    Serial.println("Iniciando menú de configuración...");
     // Dibuja el menú inicial
+    UpdateLanguageTexts();
     DrawMenu(currentOption);
 
     while (true) {
+        if (digitalRead(PIN_EXIT) == 0) {
+            display = 1;
+            break;
+        }
         UpdateMenuSelection();
-
+        Serial.println("Esperando selección de opción...");
         if (optionSelected) {
             ProcessSelectedOption();
             optionSelected = false;
-            delay(2000); // Tiempo para mostrar la configuración antes de volver al menú
-            DrawMenu(currentOption);
+            Serial.println("Opción seleccionada");
+            delay(500); // Tiempo para mostrar la configuración antes de volver al menú
+            DrawMenu(currentOption);    
+            Serial.println("Volviendo al menú principal...");
         }
 
         delay(100); // Para evitar lecturas continuas excesivas
+    }
+}
+
+void UpdateLanguageTexts() {
+    if (currentLanguage == LANGUAGE_SPANISH) {
+        menuLanguage = "Idioma";
+        menuPower = "Potencia Contratada";
+        menuMaxProduction = "Produccion Maxima";
+        menuMinCapacity = "Capacidad Minima";
+
+        produccion = "PRODUCCION";
+        consumo = "  CONSUMO ";
+        sobran = " CAPACIDAD ";
+
+        titulo0 = "     ULTIMAS 24 HORAS     "; // 26 caracteres
+        titulo1 = "           HOY            "; // 26 caracteres
+        titulo2 = "       TIEMPO REAL        "; // 26 caracteres
+    } else if (currentLanguage == LANGUAGE_ENGLISH) {
+        menuLanguage = "Language";
+        menuPower = "Contracted Power";
+        menuMaxProduction = "Maximum Production";
+        menuMinCapacity = "Minimum Capacity";
+
+        produccion = "PRODUCTION";
+        consumo = "CONSUMPTION";
+        sobran = " CAPACITY ";
+
+        titulo0 = "   LAST 24 HOURS ENERGY   "; // 26 caracteres
+        titulo1 = "          TODAY           "; // 26 caracteres
+        titulo2 = "        REAL TIME         "; // 26 caracteres
     }
 }

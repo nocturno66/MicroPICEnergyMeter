@@ -71,6 +71,7 @@ void display_menu();
 void ProcessSelectedOption();
 void UpdateMenuSelection();
 void DrawMenu(MenuOption selectedOption);
+void UpdateLanguageTexts();
 
 
 
