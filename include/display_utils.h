@@ -20,6 +20,7 @@ typedef enum {
     MENU_POWER,
     MENU_MAX_PRODUCTION,
     MENU_MIN_CAPACITY,
+    MENU_EXIT,
     MENU_OPTIONS_COUNT
 } MenuOption;
 
@@ -69,7 +70,7 @@ void actualiza_display();
 
 void display_menu();
 void ProcessSelectedOption();
-void UpdateMenuSelection();
+void UpdateMenuSelection(bool &editingValue, bool &exitMenu);
 void DrawMenu(MenuOption selectedOption);
 void UpdateLanguageTexts();
 

@@ -16,6 +16,9 @@
 #define DIA_ACTUAL 0
 #define ULTIMAS_24h 1
 
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#define max(a, b) ((a) > (b) ? (a) : (b))
+
 
 /***************************************************************************************************************************/
 /***************************************************************************************************************************/
@@ -62,7 +65,7 @@ bool optionSelected = false;
 Language currentLanguage = LANGUAGE_SPANISH;
 
 // Textos dinámicos
-String menuLanguage, menuPower, menuMaxProduction, menuMinCapacity;
+String menuLanguage, menuPower, menuMaxProduction, menuMinCapacity, menuExit;
 String produccion, consumo, sobran, titulo0, titulo1, titulo2;
 
 
@@ -908,107 +911,121 @@ void reconnectMQTT() {
         }
     }
 }
-
-void DrawMenu(MenuOption selectedOption) {
+void DrawMenu(MenuOption selectedOption, bool editingValue) {
     char buffer[10];
     // Limpia la pantalla
     EPD_Clear(0, 0, 296, 128, WHITE);
 
     // Muestra las opciones de menú
-    EPD_ShowString (0,0, "MicroPIC MQTT Energy Meter - SETUP", BLACK, 16);
-    EPD_ShowString(10, 20, menuLanguage.c_str(), (selectedOption == MENU_LANGUAGE) ? WHITE : BLACK, 16);
-    EPD_ShowString(170, 20, (currentLanguage == LANGUAGE_SPANISH) ? "Castellano" : "English", BLACK, 16);
-    EPD_ShowString(10, 40, menuPower.c_str(), (selectedOption == MENU_POWER) ? WHITE : BLACK, 16);
+    EPD_ShowString(0, 0, "MicroPIC MQTT Energy Meter - SETUP", BLACK, 16);
+    EPD_DrawLine(0, 18, 296, 18, BLACK);
+    EPD_ShowString(10, 25, menuLanguage.c_str(), (selectedOption == MENU_LANGUAGE && !editingValue) ? WHITE : BLACK, 16);
+    EPD_ShowString(170, 25, (currentLanguage == LANGUAGE_SPANISH) ? "Castellano" : "English", (selectedOption == MENU_LANGUAGE && editingValue) ? WHITE : BLACK, 16);
+
+    EPD_ShowString(10, 45, menuPower.c_str(), (selectedOption == MENU_POWER && !editingValue) ? WHITE : BLACK, 16);
     sprintf(buffer, "%d", v_potencia_contratada);
-    EPD_ShowString(170, 40, buffer, BLACK, 16);
+    EPD_ShowString(170, 45, buffer, (selectedOption == MENU_POWER && editingValue) ? WHITE : BLACK, 16);
 
-    EPD_ShowString(10, 60, menuMaxProduction.c_str(), (selectedOption == MENU_MAX_PRODUCTION) ? WHITE : BLACK, 16);
+    EPD_ShowString(10, 65, menuMaxProduction.c_str(), (selectedOption == MENU_MAX_PRODUCTION && !editingValue) ? WHITE : BLACK, 16);
     sprintf(buffer, "%d", v_produccion_max);
-    EPD_ShowString(170, 60, buffer, BLACK, 16);
+    EPD_ShowString(170, 65, buffer, (selectedOption == MENU_MAX_PRODUCTION && editingValue) ? WHITE : BLACK, 16);
 
-    EPD_ShowString(10, 80, menuMinCapacity.c_str(), (selectedOption == MENU_MIN_CAPACITY) ? WHITE : BLACK, 16);
+    EPD_ShowString(10, 85, menuMinCapacity.c_str(), (selectedOption == MENU_MIN_CAPACITY && !editingValue) ? WHITE : BLACK, 16);
     sprintf(buffer, "%d", v_capacidad_min);
-    EPD_ShowString(170, 80, buffer, BLACK, 16);
+    EPD_ShowString(170, 85, buffer, (selectedOption == MENU_MIN_CAPACITY && editingValue) ? WHITE : BLACK, 16);
+
+    EPD_ShowString (10, 105, menuExit.c_str(), (selectedOption == MENU_EXIT) ? WHITE : BLACK, 16);
 
     // Actualizar pantalla
     EPD_DisplayImage(ImageBW);
     EPD_PartUpdate();
 }
 
-void UpdateMenuSelection() {
+void UpdateMenuSelection(bool &editingValue, bool &exitMenu) {
     if (digitalRead(PIN_UP) == 0) {
-        // Mueve la selección hacia arriba
-        currentOption = (currentOption == MENU_LANGUAGE) ? (MenuOption)(MENU_OPTIONS_COUNT - 1) : (MenuOption)(currentOption - 1);
+        if (editingValue) {
+            // Incrementa el valor de la variable seleccionada
+            switch (currentOption) {
+                case MENU_POWER:
+                    v_potencia_contratada = min(v_potencia_contratada + 100, 99000);
+                    break;
+                case MENU_MAX_PRODUCTION:
+                    v_produccion_max = min(v_produccion_max + 100, 99000);
+                    break;
+                case MENU_MIN_CAPACITY:
+                    v_capacidad_min = min(v_capacidad_min + 100, 99000);
+                    break;
+                default:
+                    break;
+            }
+        } else {
+            // Mueve la selección hacia arriba
+            currentOption = (currentOption == MENU_LANGUAGE) ? (MenuOption)(MENU_OPTIONS_COUNT - 1) : (MenuOption)(currentOption - 1);
+        }
         while (digitalRead(PIN_UP) == 0); // Espera a que se suelte el botón
-        DrawMenu(currentOption);
+        DrawMenu(currentOption, editingValue);
     }
     if (digitalRead(PIN_DOWN) == 0) {
-        // Mueve la selección hacia abajo
-        currentOption = (MenuOption)((currentOption + 1) % MENU_OPTIONS_COUNT);
+        if (editingValue) {
+            // Decrementa el valor de la variable seleccionada
+            switch (currentOption) {
+                case MENU_POWER:
+                    v_potencia_contratada = max(v_potencia_contratada - 100, 0);
+                    break;
+                case MENU_MAX_PRODUCTION:
+                    v_produccion_max = max(v_produccion_max - 100, 0);
+                    break;
+                case MENU_MIN_CAPACITY:
+                    v_capacidad_min = max(v_capacidad_min - 100, 0);
+                    break;
+                default:
+                    break;
+            }
+        } else {
+            // Mueve la selección hacia abajo
+            currentOption = (MenuOption)((currentOption + 1) % MENU_OPTIONS_COUNT);
+        }
         while (digitalRead(PIN_DOWN) == 0); // Espera a que se suelte el botón
-        DrawMenu(currentOption);
+        DrawMenu(currentOption, editingValue);
     }
-    if (digitalRead(PIN_MENU) == 0) {
+    if (digitalRead(PIN_MENU) == 0 && !editingValue) {
         if (currentOption == MENU_LANGUAGE) {
             // Alternar idioma
             currentLanguage = (currentLanguage == LANGUAGE_SPANISH) ? LANGUAGE_ENGLISH : LANGUAGE_SPANISH;
             UpdateLanguageTexts();
-            DrawMenu(currentOption);
-        } else {
-            // Marca la opción como seleccionada
-            optionSelected = true;
+        } else if (currentOption == MENU_EXIT) {
+            // Guardar la configuración y salir del menú
+            exitMenu = true;
+            } else {
+            // Entra en modo de edición de valor
+            editingValue = true;
         }
         while (digitalRead(PIN_MENU) == 0); // Espera a que se suelte el botón
+        DrawMenu(currentOption, editingValue);
     }
-}
-
-void ProcessSelectedOption() {
-    switch (currentOption) {
-        case MENU_LANGUAGE:
-            // Código para configurar el idioma
-            EPD_ShowString(10, 100, "Configurar Idioma", BLACK, 16);
-            break;
-        case MENU_POWER:
-            // Código para configurar la potencia contratada
-            EPD_ShowString(10, 100, "Configurar Potencia", BLACK, 16);
-            break;
-        case MENU_MAX_PRODUCTION:
-            // Código para configurar la producción máxima
-            EPD_ShowString(10, 100, "Configurar Produccion", BLACK, 16);
-            break;
-        case MENU_MIN_CAPACITY:
-            // Código para configurar la capacidad mínima
-            EPD_ShowString(10, 100, "Configurar Capacidad", BLACK, 16);
-            break;
-        default:
-            break;
+    if (digitalRead(PIN_MENU) == 0 && editingValue) {
+        // Confirma el valor editado y vuelve al menú
+        editingValue = false;
+        while (digitalRead(PIN_MENU) == 0); // Espera a que se suelte el botón
+        DrawMenu(currentOption, editingValue);
     }
 }
 
 void display_menu() {
     Serial.println("Iniciando menú de configuración...");
+    currentOption = MENU_LANGUAGE;
     // Dibuja el menú inicial
     UpdateLanguageTexts();
-    DrawMenu(currentOption);
+    bool editingValue = false;
+    bool exitMenu = false;
+    DrawMenu(currentOption, editingValue);
 
-    while (true) {
-        if (digitalRead(PIN_EXIT) == 0) {
-            display = 1;
-            break;
-        }
-        UpdateMenuSelection();
+    while (!exitMenu) {
+        UpdateMenuSelection(editingValue, exitMenu);
         Serial.println("Esperando selección de opción...");
-        if (optionSelected) {
-            ProcessSelectedOption();
-            optionSelected = false;
-            Serial.println("Opción seleccionada");
-            delay(500); // Tiempo para mostrar la configuración antes de volver al menú
-            DrawMenu(currentOption);    
-            Serial.println("Volviendo al menú principal...");
-        }
-
         delay(100); // Para evitar lecturas continuas excesivas
     }
+    display = 1;
 }
 
 void UpdateLanguageTexts() {
@@ -1017,6 +1034,7 @@ void UpdateLanguageTexts() {
         menuPower = "Potencia Contratada";
         menuMaxProduction = "Produccion Maxima";
         menuMinCapacity = "Capacidad Minima";
+        menuExit = "Salir de Configuracion";
 
         produccion = "PRODUCCION";
         consumo = "  CONSUMO ";
@@ -1030,6 +1048,7 @@ void UpdateLanguageTexts() {
         menuPower = "Contracted Power";
         menuMaxProduction = "Maximum Production";
         menuMinCapacity = "Minimum Capacity";
+        menuExit = "Exit Configuration";
 
         produccion = "PRODUCTION";
         consumo = "CONSUMPTION";
