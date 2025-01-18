@@ -11,6 +11,7 @@
 #include "flecha.h"
 #include "wificon.h"
 #include "gauge.h"
+#include "micropic.h"
 
 #define DIA_ACTUAL 0
 #define ULTIMAS_24h 1
@@ -37,17 +38,23 @@
     String titulo2 = "        REAL TIME         "; // 26 caracteres
 #endif
 
+/***************************************************************************************************************************/
+/***************************************************************************************************************************/
+/********************                           VARIABLES                ***************************************************/ 
+/***************************************************************************************************************************/
+/***************************************************************************************************************************/
+
 // Variables relacionadas con los datos del JSON
 unsigned int v_produccion = 0;
 unsigned int v_consumo = 0;
-unsigned int v_capacidad = 0;
+int v_capacidad = 0;
 int alerta_capacidad=0;
 
-unsigned int v_potencia_contratada = 4600;
-unsigned int v_produccion_max = 5000;
-unsigned int v_capacidad_min = 1000;
+extern unsigned int v_potencia_contratada;
+extern unsigned int v_produccion_max;
+extern unsigned int v_capacidad_min;
 
-unsigned int v_consumo_max = v_produccion_max + v_potencia_contratada;
+extern unsigned int v_consumo_max;
 
 String fecha = "";
 String hora = "";
@@ -71,56 +78,14 @@ int hora_anterior = -1; // Para detectar cambios de hora
 int hora_actual = -1;
 
 
-void inicializa_display() {
-    // Set the screen power pin to output mode and set it to high level to turn on the power
-    pinMode(7, OUTPUT);  // Set GPIO 7 to output mode
-    digitalWrite(7, HIGH);  // Set GPIO 7 to high level to turn on the power
 
-    pinMode(1, INPUT);  // Set GPIO 1 to input mode EXIT
-    pinMode(2, INPUT);  // Set GPIO 2 to input mode MENU
-    pinMode(4, INPUT);  // Set GPIO 4 to input mode DOWN
-    pinMode(5, INPUT);  // Set GPIO 5 to input mode CONF
-    pinMode(6, INPUT);  // Set GPIO 6 to input mode UP
 
-    EPD_Init();
-    EPD_Clear(0, 0, 296, 128, WHITE);
-    EPD_ALL_Fill(WHITE);
-    EPD_Update();
-    EPD_Clear_R26H();
-}
 
-void clear_all()
-{
-  EPD_Init();
-  EPD_Clear(0, 0, 296, 128, WHITE);
-  EPD_ALL_Fill(WHITE);
-  EPD_Update();
-  EPD_Clear_R26H();
-}
-
-void simbolo_wifi(int estado) {
-    if (estado)
-        EPD_ShowPicture(287, 0, 8, 8, gImage_wifi, BLACK);
-    else
-        EPD_ShowPicture(287, 0, 8, 8, gImage_blanca, BLACK);
-}
-
-void simbolo_mqtt(int estado) {
-    if (estado)
-        EPD_ShowPicture(278, 0, 8, 8, gImage_mqtt, BLACK);
-    else
-        EPD_ShowPicture(278, 0, 8, 8, gImage_blanca, BLACK);
-}
-
-void encabezado(String titulo) {
-    char buffer[50];
-    snprintf(buffer, sizeof(buffer), "%10s %8s %s", fecha.c_str(),hora.c_str(),titulo.c_str());
-    EPD_ShowString(0, 0, buffer, BLACK, 12);
-    simbolo_wifi(1);
-    simbolo_mqtt(1);
-
-}
-
+/***************************************************************************************************************************/
+/***************************************************************************************************************************/
+/********************                           CÁLCULOS                 ***************************************************/ 
+/***************************************************************************************************************************/
+/***************************************************************************************************************************/
 
     
 
@@ -182,22 +147,142 @@ void obtenerFechaHora(String fechaCompleta, String &fecha, String &hora) {
            (segundos < 10 ? "0" : "") + String(segundos);
 }
 
-void actualiza_display() {
-    switch (display) {
-        case 0:
-            actualiza_display_2();
-            break;
-        case 1:
-            actualiza_display_1();
-            break;
-        case 2:
-            actualiza_display_0();
-            break;
+
+float integraEnergia(int consumoActual, String horaActual, String horaAnterior) {
+    float energiaIntervalo;
+
+    // Imprimir entradas iniciales
+    Serial.println("=== Debug integraEnergia ===");
+    Serial.print("Consumo actual: ");
+    Serial.println(consumoActual);
+    Serial.print("Hora actual: ");
+    Serial.println(horaActual);
+    Serial.print("Hora anterior: ");
+    Serial.println(horaAnterior);
+
+    // Convertir horaActual y horaAnterior a segundos desde el inicio del día
+    int hActual, mActual, sActual;
+    int hAnterior, mAnterior, sAnterior;
+
+    sscanf(horaActual.c_str(), "%02d:%02d:%02d", &hActual, &mActual, &sActual);
+    sscanf(horaAnterior.c_str(), "%02d:%02d:%02d", &hAnterior, &mAnterior, &sAnterior);
+
+    // Imprimir horas convertidas
+    Serial.print("Hora actual (h:m:s): ");
+    Serial.print(hActual); Serial.print(":");
+    Serial.print(mActual); Serial.print(":");
+    Serial.println(sActual);
+
+    Serial.print("Hora anterior (h:m:s): ");
+    Serial.print(hAnterior); Serial.print(":");
+    Serial.print(mAnterior); Serial.print(":");
+    Serial.println(sAnterior);
+
+    unsigned long segundosActual = hActual * 3600 + mActual * 60 + sActual;
+    unsigned long segundosAnterior = hAnterior * 3600 + mAnterior * 60 + sAnterior;
+
+    // Imprimir tiempo en segundos
+    Serial.print("Segundos actuales: ");
+    Serial.println(segundosActual);
+    Serial.print("Segundos anteriores: ");
+    Serial.println(segundosAnterior);
+
+    // Calcular el tiempo transcurrido en segundos
+    long deltaSegundos = segundosActual - segundosAnterior;
+    if (deltaSegundos < 0) {
+        // Si el tiempo actual es menor que el anterior, asumimos un cambio de día
+        deltaSegundos += 24 * 3600;
+        Serial.println("Cambio de día detectado. Ajustando deltaSegundos.");
     }
-};
+
+    if (deltaSegundos<3600) {
 
 
+    Serial.print("Delta segundos: ");
+    Serial.println(deltaSegundos);
 
+    // Calcular la energía consumida en el intervalo (Wh)
+    energiaIntervalo = (float(consumoActual) * deltaSegundos) / 3600.0;
+
+    // Imprimir energía calculada en el intervalo
+    Serial.print("Energía intervalo (Wh): ");
+    Serial.println(energiaIntervalo);
+    } else {
+        energiaIntervalo =0;
+    }
+    // Devolver el nuevo consumo acumulado
+    return energiaIntervalo;
+}
+
+
+void mantenerHoraAnterior(String fecha, String hora, String &horaAnterior, String &fechaAnterior) {
+    // Si la fecha cambia, reiniciar horaAnterior a las 00:00:00 del nuevo día
+    if (fecha != fechaAnterior) {
+        fechaAnterior = fecha;
+        horaAnterior = "00:00:00";
+    } else {
+        horaAnterior = hora;
+    }
+}
+
+/***************************************************************************************************************************/
+/***************************************************************************************************************************/
+/********************                FUNCIONES GRÁFICAS                  ***************************************************/ 
+/***************************************************************************************************************************/
+/***************************************************************************************************************************/
+
+void inicializa_display() {
+    // Set the screen power pin to output mode and set it to high level to turn on the power
+    pinMode(7, OUTPUT);  // Set GPIO 7 to output mode
+    digitalWrite(7, HIGH);  // Set GPIO 7 to high level to turn on the power
+
+    pinMode(1, INPUT);  // Set GPIO 1 to input mode EXIT
+    pinMode(2, INPUT);  // Set GPIO 2 to input mode MENU
+    pinMode(4, INPUT);  // Set GPIO 4 to input mode DOWN
+    pinMode(5, INPUT);  // Set GPIO 5 to input mode CONF
+    pinMode(6, INPUT);  // Set GPIO 6 to input mode UP
+
+    EPD_Init();
+    EPD_Clear(0, 0, 296, 128, WHITE);
+    EPD_ALL_Fill(WHITE);
+    EPD_Update();
+    EPD_Clear_R26H();
+}
+
+void clear_all()
+{
+  EPD_Init();
+  EPD_Clear(0, 0, 296, 128, WHITE);
+  EPD_ALL_Fill(WHITE);
+  EPD_Update();
+  EPD_Clear_R26H();
+}
+
+void simbolo_wifi(int estado) {
+    char buffer[3];
+    if (estado)
+        EPD_ShowPicture(287, 0, 8, 8, gImage_wifi, BLACK);
+    else {
+        EPD_ShowPicture(287, 0, 8, 8, gImage_blanca, BLACK);
+    }
+}
+
+void simbolo_mqtt(int estado) {
+    char buffer[3];
+    if (estado)
+        EPD_ShowPicture(278, 0, 8, 8, gImage_mqtt, BLACK);
+    else{
+        EPD_ShowPicture(278, 0, 8, 8, gImage_blanca, BLACK);
+    }
+}
+
+void encabezado(String titulo) {
+    char buffer[50];
+    snprintf(buffer, sizeof(buffer), "%10s %8s %s", fecha.c_str(),hora.c_str(),titulo.c_str());
+    EPD_ShowString(0, 0, buffer, BLACK, 12);
+    simbolo_wifi(1);
+    simbolo_mqtt(1);
+}
 
 void EPD_ShowGauge(uint8_t percentage) {
     // Validar el porcentaje entre 0 y 100
@@ -365,87 +450,6 @@ void EPD_DrawBarGraph(uint16_t x, uint16_t y, uint16_t width, uint16_t height, u
     }
 }
 
-
-
-
-float integraEnergia(int consumoActual, String horaActual, String horaAnterior) {
-    float energiaIntervalo;
-
-    // Imprimir entradas iniciales
-    Serial.println("=== Debug integraEnergia ===");
-    Serial.print("Consumo actual: ");
-    Serial.println(consumoActual);
-    Serial.print("Hora actual: ");
-    Serial.println(horaActual);
-    Serial.print("Hora anterior: ");
-    Serial.println(horaAnterior);
-
-    // Convertir horaActual y horaAnterior a segundos desde el inicio del día
-    int hActual, mActual, sActual;
-    int hAnterior, mAnterior, sAnterior;
-
-    sscanf(horaActual.c_str(), "%02d:%02d:%02d", &hActual, &mActual, &sActual);
-    sscanf(horaAnterior.c_str(), "%02d:%02d:%02d", &hAnterior, &mAnterior, &sAnterior);
-
-    // Imprimir horas convertidas
-    Serial.print("Hora actual (h:m:s): ");
-    Serial.print(hActual); Serial.print(":");
-    Serial.print(mActual); Serial.print(":");
-    Serial.println(sActual);
-
-    Serial.print("Hora anterior (h:m:s): ");
-    Serial.print(hAnterior); Serial.print(":");
-    Serial.print(mAnterior); Serial.print(":");
-    Serial.println(sAnterior);
-
-    unsigned long segundosActual = hActual * 3600 + mActual * 60 + sActual;
-    unsigned long segundosAnterior = hAnterior * 3600 + mAnterior * 60 + sAnterior;
-
-    // Imprimir tiempo en segundos
-    Serial.print("Segundos actuales: ");
-    Serial.println(segundosActual);
-    Serial.print("Segundos anteriores: ");
-    Serial.println(segundosAnterior);
-
-    // Calcular el tiempo transcurrido en segundos
-    long deltaSegundos = segundosActual - segundosAnterior;
-    if (deltaSegundos < 0) {
-        // Si el tiempo actual es menor que el anterior, asumimos un cambio de día
-        deltaSegundos += 24 * 3600;
-        Serial.println("Cambio de día detectado. Ajustando deltaSegundos.");
-    }
-
-    if (deltaSegundos<3600) {
-
-
-    Serial.print("Delta segundos: ");
-    Serial.println(deltaSegundos);
-
-    // Calcular la energía consumida en el intervalo (Wh)
-    energiaIntervalo = (float(consumoActual) * deltaSegundos) / 3600.0;
-
-    // Imprimir energía calculada en el intervalo
-    Serial.print("Energía intervalo (Wh): ");
-    Serial.println(energiaIntervalo);
-    } else {
-        energiaIntervalo =0;
-    }
-    // Devolver el nuevo consumo acumulado
-    return energiaIntervalo;
-}
-
-
-void mantenerHoraAnterior(String fecha, String hora, String &horaAnterior, String &fechaAnterior) {
-    // Si la fecha cambia, reiniciar horaAnterior a las 00:00:00 del nuevo día
-    if (fecha != fechaAnterior) {
-        fechaAnterior = fecha;
-        horaAnterior = "00:00:00";
-    } else {
-        horaAnterior = hora;
-    }
-}
-
-
 // Función auxiliar para rotar un punto alrededor de un centro
 void rotate_point(float cx, float cy, float angle, float *x, float *y) {
     angle = angle * PI / 180.0; // Convertir a radianes
@@ -524,60 +528,6 @@ void Draw_Isosceles_Triangle(uint16_t x, uint16_t y, uint16_t base, uint16_t hei
     }
 }
 
-void actualiza_display_2() {
-    char buffer[50];
-
-        EPD_Clear(0, 0, 296, 128, WHITE);
-        encabezado(titulo2);
-        
-        snprintf(buffer, sizeof(buffer), "%u Wh", v_produccion);
-        EPD_ShowString(0, 62, buffer, BLACK, 16);
-
-        snprintf(buffer, sizeof(buffer), "Consumo");
-        EPD_ShowString(0, 88, buffer, BLACK, 16);
-        snprintf(buffer, sizeof(buffer), "%u Wh", v_consumo);
-        EPD_ShowString(0, 104, buffer, BLACK, 16);
-
-        EPD_ShowPicture(0, 36, 96, 90, gImage_gauge, BLACK);
-        EPD_ShowPicture(102, 36, 96, 90, gImage_gauge, BLACK);
-        EPD_ShowPicture(204, 36, 96, 90, gImage_gauge, BLACK);
-
-        snprintf(buffer, sizeof(buffer), produccion.c_str());
-        EPD_ShowString(14, 24, buffer, BLACK, 12);
-        
-        int angulo = v_produccion*270/v_produccion_max-135;
-        Draw_Isosceles_Triangle(45, 81, 8, 40, angulo, BLACK, 1);
-        snprintf(buffer, sizeof(buffer), "%3u%%", v_produccion*100/v_produccion_max);
-        EPD_ShowString(32, 98, buffer, BLACK, 12);
-        snprintf(buffer, sizeof(buffer), "%5uW", v_produccion);
-        EPD_ShowString(26, 109, buffer, BLACK, 12);
-
-        snprintf(buffer, sizeof(buffer), consumo.c_str());
-        EPD_ShowString(116, 24, buffer, BLACK, 12);
-        
-        angulo = v_consumo*270/v_consumo_max-135;
-        Draw_Isosceles_Triangle(147, 81, 8, 40, angulo, BLACK, 1);
-        snprintf(buffer, sizeof(buffer), "%3u%%", v_consumo*100/v_consumo_max);
-        EPD_ShowString(132, 98, buffer, BLACK, 12);
-        snprintf(buffer, sizeof(buffer), "%5uW", v_consumo);
-        EPD_ShowString(128, 109, buffer, BLACK, 12);
-        
-        
-        snprintf(buffer, sizeof(buffer), sobran.c_str());
-        EPD_ShowString(218, 24, buffer, BLACK, 12);
-        
-        angulo = v_capacidad*270/(v_produccion+v_potencia_contratada)-135;
-        Draw_Isosceles_Triangle(249, 81, 8, 40, angulo, BLACK,1);
-        snprintf(buffer, sizeof(buffer), "%3u%%", v_capacidad*100/(v_produccion+v_potencia_contratada));
-        EPD_ShowString(236, 98, buffer, BLACK, 12);
-        snprintf(buffer, sizeof(buffer), "%5uW", v_capacidad);
-        EPD_ShowString(230, 109, buffer, BLACK, 12);
-
-        //invierte_circulo(249, 81, 45);
-
-        EPD_DisplayImage(ImageBW);
-        EPD_PartUpdate();
-}
 
 uint8_t EPD_ReadPoint(uint16_t x, uint16_t y)
 {
@@ -648,7 +598,118 @@ void invierte_circulo(int x, int y, int r) {
     }
 }
 
-void actualiza_display_0() {
+/***************************************************************************************************************************/
+/***************************************************************************************************************************/
+/********************                DISTINTAS PANTALLAS                 ***************************************************/ 
+/***************************************************************************************************************************/
+/***************************************************************************************************************************/
+
+
+void actualiza_display() {
+    switch (display) {
+        case 0:
+            display_micropic();
+            break;
+        case 1:
+            display_tiempo_real();
+            break;
+        case 2:
+            display_hoy();
+            break;
+        case 3:
+            display_ultimas24h();
+            break;
+    }
+};
+
+
+
+void display_micropic() {
+    char buffer[50];
+    int angulo;
+
+        EPD_Clear(0, 0, 296, 128, WHITE);
+                
+        EPD_ShowPicture(0, 0, 296, 128, gImage_Micropic, BLACK);
+        
+        EPD_DisplayImage(ImageBW);
+        EPD_PartUpdate();
+}
+
+
+void display_tiempo_real() {
+    char buffer[50];
+    int angulo;
+
+        EPD_Clear(0, 0, 296, 128, WHITE);
+        encabezado(titulo2);
+        
+        snprintf(buffer, sizeof(buffer), "%u Wh", v_produccion);
+        EPD_ShowString(0, 62, buffer, BLACK, 16);
+        snprintf(buffer, sizeof(buffer), "Consumo");
+        EPD_ShowString(0, 88, buffer, BLACK, 16);
+        snprintf(buffer, sizeof(buffer), "%u Wh", v_consumo);
+        EPD_ShowString(0, 104, buffer, BLACK, 16);
+        EPD_ShowPicture(0, 36, 96, 90, gImage_gauge, BLACK);
+        EPD_ShowPicture(102, 36, 96, 90, gImage_gauge, BLACK);
+        EPD_ShowPicture(204, 36, 96, 90, gImage_gauge, BLACK);
+        snprintf(buffer, sizeof(buffer), produccion.c_str());
+        EPD_ShowString(14, 24, buffer, BLACK, 12);
+        
+        if (v_produccion_max==0) {
+            snprintf(buffer, sizeof(buffer), "  0%%");
+            angulo=-135;
+            Serial.println("v_produccion_max=0, angulo=0");
+            }
+        else {
+            snprintf(buffer, sizeof(buffer), "%3u%%", v_produccion*100/v_produccion_max);
+            angulo = v_produccion*270/v_produccion_max-135;
+            Serial.println("v_produccion_max!=0, angulo calculado");
+            }
+        Draw_Isosceles_Triangle(45, 81, 8, 40, angulo, BLACK, 1);
+        
+        EPD_ShowString(32, 98, buffer, BLACK, 12);
+        snprintf(buffer, sizeof(buffer), "%5uW", v_produccion);
+        EPD_ShowString(26, 109, buffer, BLACK, 12);
+        snprintf(buffer, sizeof(buffer), consumo.c_str());
+        EPD_ShowString(116, 24, buffer, BLACK, 12);
+        if (v_consumo_max==0) {
+            snprintf(buffer, sizeof(buffer), "  0%%");
+            angulo=-135;
+            Serial.println("v_consumo_max=0, angulo=0");
+            }
+        else {
+            snprintf(buffer, sizeof(buffer), "%3u%%", v_consumo*100/v_consumo_max);
+            angulo = v_consumo*270/v_consumo_max-135;
+            Serial.println("v_consumo_max!=0, angulo calculado");
+            }
+        Draw_Isosceles_Triangle(147, 81, 8, 40, angulo, BLACK, 1);
+        EPD_ShowString(132, 98, buffer, BLACK, 12);
+        snprintf(buffer, sizeof(buffer), "%5uW", v_consumo);
+        EPD_ShowString(128, 109, buffer, BLACK, 12);
+        
+        snprintf(buffer, sizeof(buffer), sobran.c_str());
+        EPD_ShowString(218, 24, buffer, BLACK, 12);
+        if (v_produccion+v_potencia_contratada==0) {
+            snprintf(buffer, sizeof(buffer), "  0%%");
+            angulo=-135;
+            Serial.println("v_produccion+v_potencia_contratada=0, angulo=0");
+            }
+        else {
+            snprintf(buffer, sizeof(buffer), "%3u%%", v_capacidad*100/(v_produccion+v_potencia_contratada));
+            angulo = v_capacidad*270/(v_produccion+v_potencia_contratada)-135;
+            Serial.println("v_produccion+v_potencia_contratada!=0, angulo calculado");
+            }
+        Draw_Isosceles_Triangle(249, 81, 8, 40, angulo, BLACK,1);
+        EPD_ShowString(236, 98, buffer, BLACK, 12);
+        snprintf(buffer, sizeof(buffer), "%5uW", v_capacidad);
+        EPD_ShowString(230, 109, buffer, BLACK, 12);
+        EPD_DisplayImage(ImageBW);
+        EPD_PartUpdate();
+}
+
+
+void display_hoy() {
     char buffer[50];
     int x = 103;
     int y1 = 12;
@@ -656,6 +717,7 @@ void actualiza_display_0() {
     int ancho = 192;
     int alto = 48;
     int anchocolumna = (ancho-24)/24;
+    int xflecha;
 
     float prod_total, cons_total;
 
@@ -679,9 +741,14 @@ void actualiza_display_0() {
     EPD_ShowString(17, y1+24, buffer, BLACK, 12);
     EPD_DrawRectangle(0, y1, 80, 36, BLACK, WHITE);
     EPD_ShowPicture(0, y1+38, 80, 5, gImage_escala, BLACK);
-    int xflecha = v_produccion*77/v_produccion_max;
-    if (xflecha > 77) xflecha = 77;
-    if (xflecha < 0) xflecha = 0;
+    if (v_produccion_max==0) {
+        xflecha = 0;
+        }
+    else {
+        xflecha = v_produccion*77/v_produccion_max;
+        if (xflecha > 77) xflecha = 77;
+        if (xflecha < 0) xflecha = 0;
+        }
     EPD_ShowPicture(xflecha, y1+43, 8, 8, gImage_flecha, BLACK);
     
     EPD_ShowPicture(0, y2+10, 16, 22, gImage_enchufe, BLACK);
@@ -693,9 +760,14 @@ void actualiza_display_0() {
     EPD_ShowString(17, y2+24, buffer, BLACK, 12);
     EPD_DrawRectangle(0, y2, 80, 36, BLACK, WHITE);
     EPD_ShowPicture(0, y2+38, 80, 5, gImage_escala, BLACK);
-    xflecha = v_consumo*77/v_consumo_max;
-    if (xflecha > 77) xflecha = 77;
-    if (xflecha < 0) xflecha = 0;
+    if (v_consumo_max==0) {
+        int xflecha = 0;
+        }
+    else {
+        int xflecha = v_consumo*77/v_consumo_max;
+        if (xflecha > 77) xflecha = 77;
+        if (xflecha < 0) xflecha = 0;
+        }
     EPD_ShowPicture(xflecha, y2+43, 8, 8, gImage_flecha, BLACK);
 
     EPD_DrawBarGraph(x, y1, ancho, alto, anchocolumna, 1, produccion_acumulada, ULTIMAS_24h);  
@@ -713,7 +785,7 @@ void actualiza_display_0() {
     EPD_PartUpdate();
 }
 
-void actualiza_display_1() {
+void display_ultimas24h() {
     char buffer[50];
     char potencia[10];
     int x = 103;
@@ -723,6 +795,7 @@ void actualiza_display_1() {
     int alto = 48;
     int anchocolumna = (ancho-24)/24;
     int posicion_insercion;
+    int xflecha;
 
     float prod_total, cons_total;
 
@@ -746,9 +819,14 @@ void actualiza_display_1() {
     EPD_ShowString(17, y1+24, buffer, BLACK, 12);
     EPD_DrawRectangle(0, y1, 80, 36, BLACK, WHITE);
     EPD_ShowPicture(0, y1+38, 80, 5, gImage_escala, BLACK);
-    int xflecha = v_produccion*77/v_produccion_max;
-    if (xflecha > 77) xflecha = 77;
-    if (xflecha < 0) xflecha = 0;
+    if (v_produccion_max==0) {
+        xflecha = 0;
+        }
+    else {
+        xflecha = v_produccion*77/v_produccion_max;
+        if (xflecha > 77) xflecha = 77;
+        if (xflecha < 0) xflecha = 0;
+        }
     EPD_ShowPicture(xflecha, y1+43, 8, 8, gImage_flecha, BLACK);
     
     EPD_ShowPicture(0, y2+10, 16, 22, gImage_enchufe, BLACK);
@@ -760,9 +838,14 @@ void actualiza_display_1() {
     EPD_ShowString(17, y2+24, buffer, BLACK, 12);
     EPD_DrawRectangle(0, y2, 80, 36, BLACK, WHITE);
     EPD_ShowPicture(0, y2+38, 80, 5, gImage_escala, BLACK);
-    xflecha = v_consumo*77/v_consumo_max;
-    if (xflecha > 77) xflecha = 77;
-    if (xflecha < 0) xflecha = 0;
+    if (v_consumo_max==0) {
+        int xflecha = 0;
+        }
+    else {
+        int xflecha = v_consumo*77/v_consumo_max;
+        if (xflecha > 77) xflecha = 77;
+        if (xflecha < 0) xflecha = 0;
+        }
     EPD_ShowPicture(xflecha, y2+43, 8, 8, gImage_flecha, BLACK);
 
     EPD_DrawBarGraph(x, y1, ancho, alto, anchocolumna, 1, produccion_acumulada, DIA_ACTUAL);  
@@ -776,6 +859,12 @@ void actualiza_display_1() {
     EPD_DisplayImage(ImageBW);
     EPD_PartUpdate();
 };
+
+/***************************************************************************************************************************/
+/***************************************************************************************************************************/
+/********************                       MQTT                         ***************************************************/ 
+/***************************************************************************************************************************/
+/***************************************************************************************************************************/
 
 
 
@@ -829,6 +918,7 @@ void reconnectMQTT() {
             client.subscribe(mqtt_topic); // Suscribirse al tópico
             Serial.print("Suscrito al tópico: ");
             Serial.println(mqtt_topic);
+            simbolo_mqtt(1);
         } else {
             Serial.print("Falló la conexión a MQTT, estado: ");
             Serial.println(client.state());

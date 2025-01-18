@@ -13,7 +13,7 @@ extern uint8_t ImageBW[27200];
 // Variables relacionadas con los datos del JSON
 extern unsigned int v_produccion;
 extern unsigned int v_consumo;
-extern unsigned int v_capacidad;
+extern int v_capacidad;
 extern String fecha;
 extern String hora;
 
@@ -41,9 +41,10 @@ void invierte_circulo(int x, int y, int r);
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void reconnectMQTT();
 
-void actualiza_display_0();
-void actualiza_display_1();
-void actualiza_display_2();
+void display_micropic();
+void display_tiempo_real();
+void display_hoy();
+void display_ultimas24h();
 void actualiza_display();
 
 #endif // DISPLAY_UTILS_H
