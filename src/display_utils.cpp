@@ -1,7 +1,7 @@
 #include <Arduino_JSON.h>
 #include <Arduino.h>
 #include "secrets.h"
-
+#include <Preferences.h>
 #include "display_utils.h"
 #include "EPD.h"
 #include <math.h>
@@ -33,9 +33,11 @@ unsigned int v_consumo = 0;
 int v_capacidad = 0;
 int alerta_capacidad=0;
 
+extern Preferences preferences;
 extern unsigned int v_potencia_contratada;
 extern unsigned int v_produccion_max;
 extern unsigned int v_capacidad_min;
+extern String ssid, password, mqtt_server, mqtt_topic, mqtt_user, mqtt_password;
 
 extern unsigned int v_consumo_max;
 
@@ -64,10 +66,14 @@ int hora_actual = -1;
 MenuOption currentOption = MENU_LANGUAGE;
 bool optionSelected = false;
 Language currentLanguage = LANGUAGE_SPANISH;
+Connection currentConnection = NO_CAMBIO;
 
 // Textos dinámicos
-String menuLanguage, menuPower, menuMaxProduction, menuMinCapacity, menuExit;
+String menuLanguage, menuPower, menuMaxProduction, menuMinCapacity, menuConnection, menuExit;
 String produccion, consumo, sobran, titulo0, titulo1, titulo2;
+String mens_connecting, mens_connected, mens_failed, mens_mqtt_connecting, mens_mqtt_connected, mens_mqtt_failed;
+String mens_abrirwifimovil, mens_navegador;
+
 
 
 
@@ -896,19 +902,20 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 void reconnectMQTT() {
-    while (!client.connected()) {
-        Serial.print("Intentando conectar a MQTT...");
-        if (client.connect("ESP32Client", mqtt_user, mqtt_password)) {
+    if (!client.connected()) {
+        //Serial.print("Intentando conectar a MQTT...");
+        if (client.connect("ESP32Client", mqtt_user.c_str(), mqtt_password.c_str())) {
             Serial.println("Conectado a MQTT");
-            client.subscribe(mqtt_topic); // Suscribirse al tópico
+            client.subscribe(mqtt_topic.c_str()); // Suscribirse al tópico
             Serial.print("Suscrito al tópico: ");
-            Serial.println(mqtt_topic);
+            Serial.println(mqtt_topic.c_str());
             simbolo_mqtt(1);
         } else {
-            Serial.print("Falló la conexión a MQTT, estado: ");
-            Serial.println(client.state());
-            Serial.println("Reintentando en 5 segundos...");
-            delay(5000);
+            //Serial.print("Falló la conexión a MQTT, estado: ");
+            //Serial.println(client.state());
+            //Serial.println("Reintentando en 5 segundos...");
+            //delay(5000);
+            Serial.print ("@");
         }
     }
 }
@@ -918,24 +925,27 @@ void DrawMenu(MenuOption selectedOption, bool editingValue) {
     EPD_Clear(0, 0, 296, 128, WHITE);
 
     // Muestra las opciones de menú
-    EPD_ShowString(0, 0, "MicroPIC MQTT Energy Meter - SETUP", BLACK, 16);
-    EPD_DrawLine(0, 18, 296, 18, BLACK);
-    EPD_ShowString(10, 25, menuLanguage.c_str(), (selectedOption == MENU_LANGUAGE && !editingValue) ? WHITE : BLACK, 16);
-    EPD_ShowString(170, 25, (currentLanguage == LANGUAGE_SPANISH) ? "Castellano" : "English", (selectedOption == MENU_LANGUAGE && editingValue) ? WHITE : BLACK, 16);
+    EPD_ShowString(0, 0, "MicroPIC MQTT Energy Meter - SETUP", BLACK, 12);
+    EPD_DrawLine(0, 14, 296, 14, BLACK);
+    EPD_ShowString(10, 16, menuLanguage.c_str(), (selectedOption == MENU_LANGUAGE && !editingValue) ? WHITE : BLACK, 12);
+    EPD_ShowString(170, 16, (currentLanguage == LANGUAGE_SPANISH) ? "Castellano" : "English", (selectedOption == MENU_LANGUAGE && editingValue) ? WHITE : BLACK, 12);
 
-    EPD_ShowString(10, 45, menuPower.c_str(), (selectedOption == MENU_POWER && !editingValue) ? WHITE : BLACK, 16);
+    EPD_ShowString(10, 28, menuPower.c_str(), (selectedOption == MENU_POWER && !editingValue) ? WHITE : BLACK, 12);
     sprintf(buffer, "%d", v_potencia_contratada);
-    EPD_ShowString(170, 45, buffer, (selectedOption == MENU_POWER && editingValue) ? WHITE : BLACK, 16);
+    EPD_ShowString(170, 28, buffer, (selectedOption == MENU_POWER && editingValue) ? WHITE : BLACK, 12);
 
-    EPD_ShowString(10, 65, menuMaxProduction.c_str(), (selectedOption == MENU_MAX_PRODUCTION && !editingValue) ? WHITE : BLACK, 16);
+    EPD_ShowString(10, 40, menuMaxProduction.c_str(), (selectedOption == MENU_MAX_PRODUCTION && !editingValue) ? WHITE : BLACK, 12);
     sprintf(buffer, "%d", v_produccion_max);
-    EPD_ShowString(170, 65, buffer, (selectedOption == MENU_MAX_PRODUCTION && editingValue) ? WHITE : BLACK, 16);
+    EPD_ShowString(170, 40, buffer, (selectedOption == MENU_MAX_PRODUCTION && editingValue) ? WHITE : BLACK, 12);
 
-    EPD_ShowString(10, 85, menuMinCapacity.c_str(), (selectedOption == MENU_MIN_CAPACITY && !editingValue) ? WHITE : BLACK, 16);
+    EPD_ShowString(10, 52, menuMinCapacity.c_str(), (selectedOption == MENU_MIN_CAPACITY && !editingValue) ? WHITE : BLACK, 12);
     sprintf(buffer, "%d", v_capacidad_min);
-    EPD_ShowString(170, 85, buffer, (selectedOption == MENU_MIN_CAPACITY && editingValue) ? WHITE : BLACK, 16);
+    EPD_ShowString(170, 52, buffer, (selectedOption == MENU_MIN_CAPACITY && editingValue) ? WHITE : BLACK, 12);
 
-    EPD_ShowString (10, 105, menuExit.c_str(), (selectedOption == MENU_EXIT) ? WHITE : BLACK, 16);
+    EPD_ShowString(10, 64, menuConnection.c_str(), (selectedOption == MENU_CONNECTION && !editingValue) ? WHITE : BLACK, 12);
+    EPD_ShowString(170, 64, (currentConnection == NO_CAMBIO) ? "No cambiar" : "Configurar", (selectedOption == MENU_CONNECTION && editingValue) ? WHITE : BLACK, 12);
+
+    EPD_ShowString (10, 76, menuExit.c_str(), (selectedOption == MENU_EXIT) ? WHITE : BLACK, 12);
 
     // Actualizar pantalla
     EPD_DisplayImage(ImageBW);
@@ -959,6 +969,9 @@ void UpdateMenuSelection(bool &editingValue, bool &exitMenu) {
                     break;
                 case MENU_MIN_CAPACITY:
                     v_capacidad_min = min(v_capacidad_min + 100, 99000);
+                    break;
+                case MENU_CONNECTION:
+                    currentConnection = (currentConnection == NO_CAMBIO) ? CONFIGURAR : NO_CAMBIO;
                     break;
                 default:
                     break;
@@ -987,6 +1000,9 @@ void UpdateMenuSelection(bool &editingValue, bool &exitMenu) {
                 case MENU_MIN_CAPACITY:
                     v_capacidad_min = max(v_capacidad_min - 100, 0);
                     break;
+                case MENU_CONNECTION:
+                    currentConnection = (currentConnection == NO_CAMBIO) ? CONFIGURAR : NO_CAMBIO;
+                    break;
                 default:
                     break;
             }
@@ -1010,6 +1026,15 @@ void UpdateMenuSelection(bool &editingValue, bool &exitMenu) {
     }
     if (digitalRead(PIN_MENU) == 0 && editingValue) {
         // Confirma el valor editado y vuelve al menú
+        if (currentOption == MENU_CONNECTION) {
+            if (currentConnection == CONFIGURAR) {
+                // Guardar la configuración y salir del menú                
+                    preferences.begin("config", false);
+                    preferences.putBool("cambiar", currentConnection);
+                    preferences.end();
+                    ESP.restart();
+            }
+        }
         editingValue = false;
         while (digitalRead(PIN_MENU) == 0); // Espera a que se suelte el botón
         DrawMenu(currentOption, editingValue);
@@ -1041,11 +1066,13 @@ void display_menu() {
 
 void UpdateLanguageTexts() {
     if (currentLanguage == LANGUAGE_SPANISH) {
-        menuLanguage = "Idioma";
-        menuPower = "Potencia Contratada";
-        menuMaxProduction = "Produccion Maxima";
-        menuMinCapacity = "Capacidad Minima";
-        menuExit = "Salir de Configuracion";
+        menuLanguage = "IDIOMA";
+        menuPower = "POTENCIA CONTRATADA";
+        menuMaxProduction = "PRODUCCION MAXIMA";
+        menuMinCapacity = "CAPACIDAD MINIMA";
+        menuConnection = "CONEXION WIFI/MQTT";
+        menuExit = "SALIR DE CONFIGURACION";
+
 
         produccion = "PRODUCCION";
         consumo = "  CONSUMO ";
@@ -1054,12 +1081,25 @@ void UpdateLanguageTexts() {
         titulo0 = "     ULTIMAS 24 HORAS     "; // 26 caracteres
         titulo1 = "           HOY            "; // 26 caracteres
         titulo2 = "       TIEMPO REAL        "; // 26 caracteres
+
+        mens_connecting =     "              CONECTANDO A WIFI...                ";
+        mens_connected =      "               CONECTADO A WIFI                   ";
+        mens_failed =         "           FALLO AL CONECTAR A WIFI               ";
+        mens_mqtt_connecting ="              CONECTANDO A MQTT...                ";
+        mens_mqtt_connected = "               CONECTADO A MQTT                   ";
+        mens_mqtt_failed =    "           FALLO AL CONECTAR A MQTT               ";
+        mens_abrirwifimovil = "      CONECTE AL WIFI: MICROPIC-ENERGYMETER       ";
+        mens_navegador =      "      Y NAVEGUE HASTA LA PAGINA 192.168.0.4       ";
+
+
     } else if (currentLanguage == LANGUAGE_ENGLISH) {
-        menuLanguage = "Language";
-        menuPower = "Contracted Power";
-        menuMaxProduction = "Maximum Production";
-        menuMinCapacity = "Minimum Capacity";
-        menuExit = "Exit Configuration";
+        menuLanguage = "LANGUAGE";
+        menuPower = "CONTRACTED POWER";
+        menuMaxProduction = "MAXIMUM PRODUCTION";
+        menuMinCapacity = "MINIMUM CAPACITY";
+        menuConnection = "WIFI/MQTT CONNECTION";
+        menuExit = "EXIT CONFIGURATION";
+
 
         produccion = "PRODUCTION";
         consumo = "CONSUMPTION";
@@ -1068,5 +1108,15 @@ void UpdateLanguageTexts() {
         titulo0 = "   LAST 24 HOURS ENERGY   "; // 26 caracteres
         titulo1 = "          TODAY           "; // 26 caracteres
         titulo2 = "        REAL TIME         "; // 26 caracteres
+
+        mens_connecting =     "              CONNECTING TO WIFI...               ";
+        mens_connected =      "               CONNECTED TO WIFI                  ";
+        mens_failed =         "           FAILED TO CONNECT TO WIFI              ";
+        mens_mqtt_connecting ="              CONNECTING TO MQTT...               ";
+        mens_mqtt_connected = "               CONNECTED TO MQTT                  ";
+        mens_mqtt_failed =    "           FAILED TO CONNECT TO MQTT              ";
+        mens_abrirwifimovil = "      CONNECT TO WIFI: MICROPIC-ENERGYMETER       ";
+        mens_navegador =      "      AND NAVIGATE TO PAGE 192.168.0.4            ";
+
     }
 }

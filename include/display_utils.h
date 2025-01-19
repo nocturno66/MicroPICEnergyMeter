@@ -20,6 +20,7 @@ typedef enum {
     MENU_POWER,
     MENU_MAX_PRODUCTION,
     MENU_MIN_CAPACITY,
+    MENU_CONNECTION,
     MENU_EXIT,
     MENU_OPTIONS_COUNT
 } MenuOption;
@@ -28,6 +29,11 @@ typedef enum {
     LANGUAGE_SPANISH = 0,
     LANGUAGE_ENGLISH
 } Language;
+
+typedef enum {
+    NO_CAMBIO = 0,
+    CONFIGURAR
+} Connection;
 
 extern uint8_t ImageBW[27200];
 
