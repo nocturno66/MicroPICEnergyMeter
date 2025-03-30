@@ -15,20 +15,23 @@ WebServer server(80);
 Preferences preferences;
 
 int ciclos = 0;
+uint16_t refresco_pantalla=0;
 extern unsigned int display;
 extern int hora_actual;
 extern int alerta_capacidad;
+extern bool alarma;
 extern String mens_connecting, mens_connected, mens_failed, mens_mqtt_connecting, mens_mqtt_connected, mens_mqtt_failed;
 extern String mens_abrirwifimovil, mens_navegador;
 
 // Variables a almacenar
 unsigned int v_potencia_contratada = 0;
 unsigned int v_produccion_max = 0;
-unsigned int v_capacidad_min = 0;
+unsigned int v_limitador_max = 0;
 unsigned int v_consumo_max = 0;
 bool connection = NO_CAMBIO;
 extern Language currentLanguage ;
 String ssid, password, mqtt_server, mqtt_topic, mqtt_user, mqtt_password;
+String mqtt_topic_CONF, mqtt_topic_DOWN, mqtt_topic_UP, mqtt_topic_MENU, mqtt_topic_EXIT, mqtt_topic_ALERT;
 
 // Claves para cada variable
 #define KEY_POTENCIA "potencia"
@@ -43,6 +46,8 @@ String ssid, password, mqtt_server, mqtt_topic, mqtt_user, mqtt_password;
 #define KEY_MQTT_PASSWORD "mqtt_password"   
 #define KEY_CAMBIAR "cambiar"
 
+#define QUINCE_MINUTOS  100*60
+
 // Función para inicializar la NVS
 void initNVS() {
     if (!preferences.begin("config", false)) {
@@ -56,13 +61,21 @@ void initNVS() {
 void readFromNVS() {
     v_potencia_contratada = preferences.getUInt(KEY_POTENCIA, v_potencia_contratada);
     v_produccion_max = preferences.getUInt(KEY_PRODUCCION, v_produccion_max);
-    v_capacidad_min = preferences.getUInt(KEY_CAPACIDAD, v_capacidad_min);
+    v_limitador_max = preferences.getUInt(KEY_CAPACIDAD, v_limitador_max);
     // leer el idioma de la NVS
     currentLanguage = (Language)preferences.getUInt(KEY_IDIOMA, currentLanguage);
     ssid = preferences.getString(KEY_SSID, "");
     password = preferences.getString(KEY_PASSWORD, "");
     mqtt_server = preferences.getString(KEY_MQTT_SERVER, "");
     mqtt_topic = preferences.getString(KEY_MQTT_TOPIC, "");
+    
+    mqtt_topic_CONF = mqtt_topic + "/CONF";
+    mqtt_topic_DOWN = mqtt_topic + "/DOWN";
+    mqtt_topic_UP = mqtt_topic + "/UP";
+    mqtt_topic_MENU = mqtt_topic + "/MENU";
+    mqtt_topic_EXIT = mqtt_topic + "/EXIT";
+    mqtt_topic_ALERT = mqtt_topic + "/ALERT";
+    
     mqtt_user = preferences.getString(KEY_MQTT_USER, "");
     mqtt_password = preferences.getString(KEY_MQTT_PASSWORD, "");
     connection = (Connection)preferences.getBool(KEY_CAMBIAR, connection);
@@ -72,7 +85,7 @@ void readFromNVS() {
 void saveToNVS() {
     preferences.putUInt(KEY_POTENCIA, v_potencia_contratada);
     preferences.putUInt(KEY_PRODUCCION, v_produccion_max);
-    preferences.putUInt(KEY_CAPACIDAD, v_capacidad_min);
+    preferences.putUInt(KEY_CAPACIDAD, v_limitador_max);
     // guardar el idioma en la NVS
     preferences.putUInt(KEY_IDIOMA, currentLanguage);
     preferences.putString(KEY_SSID, ssid);
@@ -185,6 +198,7 @@ void setupAccessPoint() {
               "Topic: <input type='text' name='mqtt_topic' value='" + mqtt_topic + "'><br>"
               "User: <input type='text' name='mqtt_user' value='" + mqtt_user + "'><br>"
               "Password: <input type='password' name='mqtt_password' value='" + mqtt_password + "'><br>"
+
               "</fieldset>"
             "<br><br><br>"
             "<input type='submit' value='Guardar/Save'>"
@@ -228,16 +242,19 @@ void setupAccessPoint() {
     server.begin();
 }
 
+
 void setup() {
     Serial.begin(115200); // Inicializar el puerto serie
     int estado=1;
     
     inicializa_display();
+    pinMode(LED, OUTPUT);
+    digitalWrite(LED,0);
     
     // Inicializar variables
     v_produccion = 0;
     v_consumo = 0;
-    v_capacidad = 0;
+    v_limitador = 0;
     // Inicializar NVS
     initNVS();
 
@@ -271,12 +288,12 @@ void setup() {
     // Modificar valores como ejemplo
     //v_potencia_contratada = 4600;
     //v_produccion_max = 5000;
-    //v_capacidad_min = 1000;
+    //v_limitador_max = 1000;
     
     // imprimir los valores de las 3 variables en el debug
     Serial.printf("Potencia contratada: %u\n", v_potencia_contratada);
     Serial.printf("Producción máxima: %u\n", v_produccion_max);
-    Serial.printf("Capacidad mínima: %u\n", v_capacidad_min);
+    Serial.printf("Capacidad mínima: %u\n", v_limitador_max);
 
         // Guardar los valores actualizados en NVS
     //saveToNVS();
@@ -290,20 +307,19 @@ void loop() {
     static unsigned long lastPressTime = 0;
     static bool longPressDetected = false;
     server.handleClient();
-
     if (!client.connected()) {
         reconnectMQTT();
     }
     client.loop(); // Procesar mensajes entrantes de MQTT
-    
 
     if (digitalRead(PIN_MENU) == 0) {
         unsigned long currentPressTime = millis();
-
+        sendMQTTMessage(mqtt_topic_MENU.c_str(), "ON");
         if (lastPressTime == 0) {
             // Primera detección de pulsación
             lastPressTime = currentPressTime;
         } else if (!longPressDetected && (currentPressTime - lastPressTime > 2000)) {
+            sendMQTTMessage(mqtt_topic_MENU.c_str(), "OFF");
             // Detecta pulsación larga (> 2 segundos)
             display = 4;
             Serial.println("Display tipo: 4 (pulsación larga)");
@@ -312,6 +328,7 @@ void loop() {
         }
     } else {
         if (lastPressTime != 0 && !longPressDetected) {
+            sendMQTTMessage(mqtt_topic_MENU.c_str(), "OFF");
             // Detecta pulsación corta
             display++;
             if (display > 3) {
@@ -326,16 +343,42 @@ void loop() {
         longPressDetected = false;
     }
 
-    if (alerta_capacidad) {
-        if (ciclos == 20) {
-            invierte_circulo(249, 81, 44);
 
-            EPD_DisplayImage(ImageBW);
-            EPD_PartUpdate();
-            Serial.print("@");
+    if (digitalRead(PIN_CONF) == 0) {
+        sendMQTTMessage(mqtt_topic_CONF.c_str(), "ON");
+        while (digitalRead(PIN_CONF) == 0);
+        sendMQTTMessage(mqtt_topic_CONF.c_str(), "OFF");
+    };
+    if (digitalRead(PIN_DOWN) == 0) {
+        sendMQTTMessage(mqtt_topic_DOWN.c_str(), "ON");
+        while (digitalRead(PIN_DOWN) == 0);
+        sendMQTTMessage(mqtt_topic_DOWN.c_str(), "OFF");
+    };
+    if (digitalRead(PIN_UP) == 0) {
+        sendMQTTMessage(mqtt_topic_UP.c_str(), "ON");
+        while (digitalRead(PIN_UP) == 0);
+        sendMQTTMessage(mqtt_topic_UP.c_str(), "OFF");
+    };
+    if (digitalRead(PIN_EXIT) == 0) {
+        sendMQTTMessage(mqtt_topic_EXIT.c_str(), "ON");
+        while (digitalRead(PIN_EXIT) == 0);
+        sendMQTTMessage(mqtt_topic_EXIT.c_str(), "OFF");
+    };
+
+    if ((alarma)){
+        
+        if (ciclos == 10) {
+            digitalWrite(LED, !digitalRead(LED));
+            Serial.print("&");
             ciclos = 0;
-        }
+        } 
         ciclos++;
-    }
+    } else  
+        digitalWrite(LED,0);
     delay(10);
+
+    if (refresco_pantalla++==QUINCE_MINUTOS) {
+        //inicializa_display();
+        refresco_pantalla=0;
+    }
 }

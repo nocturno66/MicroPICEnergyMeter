@@ -30,15 +30,16 @@
 // Variables relacionadas con los datos del JSON
 unsigned int v_produccion = 0;
 unsigned int v_consumo = 0;
-int v_capacidad = 0;
-int alerta_capacidad=0;
+int v_limitador = 0;
+int alerta_capacidad=0, antigua_alerta_capacidad = 0;
+bool alarma=false;
 
 extern Preferences preferences;
 extern unsigned int v_potencia_contratada;
 extern unsigned int v_produccion_max;
-extern unsigned int v_capacidad_min;
+extern unsigned int v_limitador_max;
 extern String ssid, password, mqtt_server, mqtt_topic, mqtt_user, mqtt_password;
-
+extern String mqtt_topic_CONF, mqtt_topic_DOWN, mqtt_topic_UP, mqtt_topic_MENU, mqtt_topic_EXIT, mqtt_topic_ALERT;
 extern unsigned int v_consumo_max;
 
 String fecha = "";
@@ -69,11 +70,15 @@ Language currentLanguage = LANGUAGE_SPANISH;
 Connection currentConnection = NO_CAMBIO;
 
 // Textos dinámicos
-String menuLanguage, menuPower, menuMaxProduction, menuMinCapacity, menuConnection, menuExit;
-String produccion, consumo, sobran, titulo0, titulo1, titulo2;
+String menuLanguage, menuPower, menuMaxProduction, menuLimiter, menuConnection, menuExit;
+String produccion, consumo, limitador, titulo0, titulo1, titulo2;
 String mens_connecting, mens_connected, mens_failed, mens_mqtt_connecting, mens_mqtt_connected, mens_mqtt_failed;
 String mens_abrirwifimovil, mens_navegador;
 
+// Variables de tiempo para el movimiento por el menú
+unsigned long lastPressTime = 0;
+unsigned long repeatDelay = 500;    // Retraso inicial para comenzar la repetición (en milisegundos)
+unsigned long repeatInterval = 50; // Intervalo entre repeticiones (en milisegundos)
 
 
 
@@ -594,6 +599,8 @@ void invierte_circulo(int x, int y, int r) {
     }
 }
 
+
+
 /***************************************************************************************************************************/
 /***************************************************************************************************************************/
 /********************                DISTINTAS PANTALLAS                 ***************************************************/ 
@@ -631,10 +638,8 @@ void display_micropic() {
 void display_tiempo_real() {
     char buffer[50];
     int angulo;
-
         EPD_Clear(0, 0, 296, 128, WHITE);
         encabezado(titulo2);
-        
         snprintf(buffer, sizeof(buffer), "%u Wh", v_produccion);
         EPD_ShowString(0, 62, buffer, BLACK, 16);
         snprintf(buffer, sizeof(buffer), "Consumo");
@@ -679,24 +684,28 @@ void display_tiempo_real() {
         snprintf(buffer, sizeof(buffer), "%5uW", v_consumo);
         EPD_ShowString(128, 109, buffer, BLACK, 12);
         
-        snprintf(buffer, sizeof(buffer), sobran.c_str());
+        snprintf(buffer, sizeof(buffer), limitador.c_str());
         EPD_ShowString(218, 24, buffer, BLACK, 12);
-        if (v_produccion+v_potencia_contratada==0) {
+        if (v_produccion+v_limitador_max==0) {
             snprintf(buffer, sizeof(buffer), "  0%%");
-            angulo=-135;
-            Serial.println("v_produccion+v_potencia_contratada=0, angulo=0");
+            angulo=135;
             }
         else {
-            snprintf(buffer, sizeof(buffer), "%3u%%", v_capacidad*100/(v_produccion+v_potencia_contratada));
-            angulo = v_capacidad*270/(v_produccion+v_potencia_contratada)-135;
-            Serial.println("v_produccion+v_potencia_contratada!=0, angulo calculado");
+            if (v_limitador>v_produccion+v_limitador_max) {
+                angulo = 135;
+                snprintf(buffer, sizeof(buffer), "100%%");
+            } else {
+                snprintf(buffer, sizeof(buffer), "%3u%%", v_limitador*100/(v_produccion+v_limitador_max));
+                angulo = v_limitador*270/(v_produccion+v_limitador_max)-135;
             }
+        }
         Draw_Isosceles_Triangle(249, 81, 8, 40, angulo, BLACK,1);
         EPD_ShowString(236, 98, buffer, BLACK, 12);
-        snprintf(buffer, sizeof(buffer), "%5uW", v_capacidad);
+        snprintf(buffer, sizeof(buffer), "%5uW", v_limitador);
         EPD_ShowString(230, 109, buffer, BLACK, 12);
         EPD_DisplayImage(ImageBW);
         EPD_PartUpdate();
+        
 }
 
 
@@ -894,10 +903,23 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     produccion_acumulada[hora_actual] += integraEnergia(v_produccion, hora, horaAnterior);
     mantenerHoraAnterior(fecha, hora, horaAnterior, fechaAnterior);
 
-    v_capacidad = v_potencia_contratada+v_produccion-v_consumo;
-    if (v_capacidad<0)  v_capacidad = 0;
-    alerta_capacidad =  (v_capacidad<v_capacidad_min);
+    v_limitador = v_consumo-v_produccion;
+    if (v_limitador<0)  v_limitador = 0;
 
+    alerta_capacidad =  (v_limitador>v_limitador_max);
+    if (antigua_alerta_capacidad != alerta_capacidad) {
+        antigua_alerta_capacidad = alerta_capacidad;
+        if (alerta_capacidad) {
+            sendMQTTMessage(mqtt_topic_ALERT.c_str(),"ON");
+            digitalWrite(LED, 1);
+            alarma=true;
+        }
+        else {
+            sendMQTTMessage(mqtt_topic_ALERT.c_str(),"OFF");
+            digitalWrite(LED, 0);
+            alarma=false;
+        }
+    };
     actualiza_display();
 }
 
@@ -910,15 +932,35 @@ void reconnectMQTT() {
             Serial.print("Suscrito al tópico: ");
             Serial.println(mqtt_topic.c_str());
             simbolo_mqtt(1);
+            EPD_ShowString(0, 112, mens_mqtt_connected.c_str(), BLACK, 12);
+            EPD_DisplayImage(ImageBW);
+            EPD_PartUpdate();
         } else {
-            //Serial.print("Falló la conexión a MQTT, estado: ");
-            //Serial.println(client.state());
-            //Serial.println("Reintentando en 5 segundos...");
-            //delay(5000);
+            EPD_ShowString(0, 112, mens_mqtt_failed.c_str(), BLACK, 12);
+            EPD_DisplayImage(ImageBW);
+            EPD_PartUpdate();
             Serial.print ("@");
         }
     }
 }
+
+void sendMQTTMessage(const char* topic, const char* message) {
+    
+    if (client.connected()) {
+        if (client.publish(topic, message)) {
+            Serial.println("Mensaje enviado correctamente:");
+            Serial.println(message);
+        } else {
+            Serial.println("Error al enviar el mensaje.");
+        }
+    } else {
+        Serial.println("No conectado al servidor MQTT. Reintentando...");
+        reconnectMQTT(); // Asegúrate de tener esta función para reconectar
+    }
+}
+
+
+
 void DrawMenu(MenuOption selectedOption, bool editingValue) {
     char buffer[10];
     // Limpia la pantalla
@@ -938,9 +980,9 @@ void DrawMenu(MenuOption selectedOption, bool editingValue) {
     sprintf(buffer, "%d", v_produccion_max);
     EPD_ShowString(170, 40, buffer, (selectedOption == MENU_MAX_PRODUCTION && editingValue) ? WHITE : BLACK, 12);
 
-    EPD_ShowString(10, 52, menuMinCapacity.c_str(), (selectedOption == MENU_MIN_CAPACITY && !editingValue) ? WHITE : BLACK, 12);
-    sprintf(buffer, "%d", v_capacidad_min);
-    EPD_ShowString(170, 52, buffer, (selectedOption == MENU_MIN_CAPACITY && editingValue) ? WHITE : BLACK, 12);
+    EPD_ShowString(10, 52, menuLimiter.c_str(), (selectedOption == MENU_LIMITER && !editingValue) ? WHITE : BLACK, 12);
+    sprintf(buffer, "%d", v_limitador_max);
+    EPD_ShowString(170, 52, buffer, (selectedOption == MENU_LIMITER && editingValue) ? WHITE : BLACK, 12);
 
     EPD_ShowString(10, 64, menuConnection.c_str(), (selectedOption == MENU_CONNECTION && !editingValue) ? WHITE : BLACK, 12);
     EPD_ShowString(170, 64, (currentConnection == NO_CAMBIO) ? "No cambiar" : "Configurar", (selectedOption == MENU_CONNECTION && editingValue) ? WHITE : BLACK, 12);
@@ -952,87 +994,109 @@ void DrawMenu(MenuOption selectedOption, bool editingValue) {
     EPD_PartUpdate();
 }
 
+
 void UpdateMenuSelection(bool &editingValue, bool &exitMenu) {
+    // Variables para almacenar el estado de las teclas
+    static bool isRepeating = false; // Indica si ya estamos en modo de repetición
+
+    // Tecla hacia arriba
     if (digitalRead(PIN_UP) == 0) {
-        if (editingValue) {
-            // Incrementa el valor de la variable seleccionada
-            switch (currentOption) {
-                case MENU_LANGUAGE:
-                    currentLanguage = (currentLanguage == LANGUAGE_SPANISH) ? LANGUAGE_ENGLISH : LANGUAGE_SPANISH;
-                    UpdateLanguageTexts();
-                    break;
-                case MENU_POWER:
-                    v_potencia_contratada = min(v_potencia_contratada + 100, 99000);
-                    break;
-                case MENU_MAX_PRODUCTION:
-                    v_produccion_max = min(v_produccion_max + 100, 99000);
-                    break;
-                case MENU_MIN_CAPACITY:
-                    v_capacidad_min = min(v_capacidad_min + 100, 99000);
-                    break;
-                case MENU_CONNECTION:
-                    currentConnection = (currentConnection == NO_CAMBIO) ? CONFIGURAR : NO_CAMBIO;
-                    break;
-                default:
-                    break;
+        unsigned long currentTime = millis();
+        if (lastPressTime == 0 || (isRepeating && currentTime - lastPressTime >= repeatInterval) ||
+            (!isRepeating && currentTime - lastPressTime >= repeatDelay)) {
+            
+            // Realiza la acción de "tecla arriba"
+            if (editingValue) {
+                switch (currentOption) {
+                    case MENU_LANGUAGE:
+                        currentLanguage = (currentLanguage == LANGUAGE_SPANISH) ? LANGUAGE_ENGLISH : LANGUAGE_SPANISH;
+                        UpdateLanguageTexts();
+                        break;
+                    case MENU_POWER:
+                        v_potencia_contratada = min(v_potencia_contratada + 100, 99000);
+                        break;
+                    case MENU_MAX_PRODUCTION:
+                        v_produccion_max = min(v_produccion_max + 100, 99000);
+                        break;
+                    case MENU_LIMITER:
+                        v_limitador_max = min(v_limitador_max + 100, 99000);
+                        break;
+                    case MENU_CONNECTION:
+                        currentConnection = (currentConnection == NO_CAMBIO) ? CONFIGURAR : NO_CAMBIO;
+                        break;
+                    default:
+                        break;
+                }
+            } else {
+                currentOption = (currentOption == MENU_LANGUAGE) ? (MenuOption)(MENU_OPTIONS_COUNT - 1) : (MenuOption)(currentOption - 1);
             }
-        } else {
-            // Mueve la selección hacia arriba
-            currentOption = (currentOption == MENU_LANGUAGE) ? (MenuOption)(MENU_OPTIONS_COUNT - 1) : (MenuOption)(currentOption - 1);
+            DrawMenu(currentOption, editingValue);
+            lastPressTime = currentTime; // Actualiza el tiempo de la última acción
+            isRepeating = true;          // Activa el modo de repetición
         }
-        while (digitalRead(PIN_UP) == 0); // Espera a que se suelte el botón
-        DrawMenu(currentOption, editingValue);
+    } else {
+        isRepeating = false;   // Reinicia la repetición si la tecla no está presionada
+        lastPressTime = 0;     // Reinicia el tiempo de la última acción
     }
+
+    // Tecla hacia abajo
     if (digitalRead(PIN_DOWN) == 0) {
-        if (editingValue) {
-            // Decrementa el valor de la variable seleccionada
-            switch (currentOption) {
-                case MENU_LANGUAGE:
-                    currentLanguage = (currentLanguage == LANGUAGE_SPANISH) ? LANGUAGE_ENGLISH : LANGUAGE_SPANISH;
-                    UpdateLanguageTexts();
-                    break;
-                case MENU_POWER:
-                    v_potencia_contratada = max(v_potencia_contratada - 100, 0);
-                    break;
-                case MENU_MAX_PRODUCTION:
-                    v_produccion_max = max(v_produccion_max - 100, 0);
-                    break;
-                case MENU_MIN_CAPACITY:
-                    v_capacidad_min = max(v_capacidad_min - 100, 0);
-                    break;
-                case MENU_CONNECTION:
-                    currentConnection = (currentConnection == NO_CAMBIO) ? CONFIGURAR : NO_CAMBIO;
-                    break;
-                default:
-                    break;
+        unsigned long currentTime = millis();
+        if (lastPressTime == 0 || (isRepeating && currentTime - lastPressTime >= repeatInterval) ||
+            (!isRepeating && currentTime - lastPressTime >= repeatDelay)) {
+            
+            // Realiza la acción de "tecla abajo"
+            if (editingValue) {
+                switch (currentOption) {
+                    case MENU_LANGUAGE:
+                        currentLanguage = (currentLanguage == LANGUAGE_SPANISH) ? LANGUAGE_ENGLISH : LANGUAGE_SPANISH;
+                        UpdateLanguageTexts();
+                        break;
+                    case MENU_POWER:
+                        v_potencia_contratada = max(v_potencia_contratada - 100, 0);
+                        break;
+                    case MENU_MAX_PRODUCTION:
+                        v_produccion_max = max(v_produccion_max - 100, 0);
+                        break;
+                    case MENU_LIMITER:
+                        v_limitador_max = max(v_limitador_max - 100, 0);
+                        break;
+                    case MENU_CONNECTION:
+                        currentConnection = (currentConnection == NO_CAMBIO) ? CONFIGURAR : NO_CAMBIO;
+                        break;
+                    default:
+                        break;
+                }
+            } else {
+                currentOption = (MenuOption)((currentOption + 1) % MENU_OPTIONS_COUNT);
             }
-        } else {
-            // Mueve la selección hacia abajo
-            currentOption = (MenuOption)((currentOption + 1) % MENU_OPTIONS_COUNT);
+            DrawMenu(currentOption, editingValue);
+            lastPressTime = currentTime; // Actualiza el tiempo de la última acción
+            isRepeating = true;          // Activa el modo de repetición
         }
-        while (digitalRead(PIN_DOWN) == 0); // Espera a que se suelte el botón
-        DrawMenu(currentOption, editingValue);
+    } else {
+        isRepeating = false;   // Reinicia la repetición si la tecla no está presionada
+        lastPressTime = 0;     // Reinicia el tiempo de la última acción
     }
+
+    // Lógica de confirmación o entrada en modo edición (sin cambios)
     if (digitalRead(PIN_MENU) == 0 && !editingValue) {
         if (currentOption == MENU_EXIT) {
-            // Guardar la configuración y salir del menú
             exitMenu = true;
-            } else {
-            // Entra en modo de edición de valor
+        } else {
             editingValue = true;
         }
         while (digitalRead(PIN_MENU) == 0); // Espera a que se suelte el botón
         DrawMenu(currentOption, editingValue);
     }
+
     if (digitalRead(PIN_MENU) == 0 && editingValue) {
-        // Confirma el valor editado y vuelve al menú
         if (currentOption == MENU_CONNECTION) {
             if (currentConnection == CONFIGURAR) {
-                // Guardar la configuración y salir del menú                
-                    preferences.begin("config", false);
-                    preferences.putBool("cambiar", currentConnection);
-                    preferences.end();
-                    ESP.restart();
+                preferences.begin("config", false);
+                preferences.putBool("cambiar", currentConnection);
+                preferences.end();
+                ESP.restart();
             }
         }
         editingValue = false;
@@ -1040,6 +1104,7 @@ void UpdateMenuSelection(bool &editingValue, bool &exitMenu) {
         DrawMenu(currentOption, editingValue);
     }
 }
+
 
 void display_menu() {
     Serial.println("Iniciando menú de configuración...");
@@ -1069,14 +1134,14 @@ void UpdateLanguageTexts() {
         menuLanguage = "IDIOMA";
         menuPower = "POTENCIA CONTRATADA";
         menuMaxProduction = "PRODUCCION MAXIMA";
-        menuMinCapacity = "CAPACIDAD MINIMA";
+        menuLimiter = "LIMITADOR";
         menuConnection = "CONEXION WIFI/MQTT";
         menuExit = "SALIR DE CONFIGURACION";
 
 
         produccion = "PRODUCCION";
-        consumo = "  CONSUMO ";
-        sobran = " CAPACIDAD ";
+        consumo =    "  CONSUMO ";
+        limitador =  " LIMITADOR ";
 
         titulo0 = "     ULTIMAS 24 HORAS     "; // 26 caracteres
         titulo1 = "           HOY            "; // 26 caracteres
@@ -1089,21 +1154,21 @@ void UpdateLanguageTexts() {
         mens_mqtt_connected = "               CONECTADO A MQTT                   ";
         mens_mqtt_failed =    "           FALLO AL CONECTAR A MQTT               ";
         mens_abrirwifimovil = "      CONECTE AL WIFI: MICROPIC-ENERGYMETER       ";
-        mens_navegador =      "      Y NAVEGUE HASTA LA PAGINA 192.168.0.4       ";
+        mens_navegador =      "      Y NAVEGUE HASTA LA PAGINA 192.168.4.1       ";
 
 
     } else if (currentLanguage == LANGUAGE_ENGLISH) {
         menuLanguage = "LANGUAGE";
         menuPower = "CONTRACTED POWER";
         menuMaxProduction = "MAXIMUM PRODUCTION";
-        menuMinCapacity = "MINIMUM CAPACITY";
+        menuLimiter = "LIMITER";
         menuConnection = "WIFI/MQTT CONNECTION";
         menuExit = "EXIT CONFIGURATION";
 
 
         produccion = "PRODUCTION";
-        consumo = "CONSUMPTION";
-        sobran = " CAPACITY ";
+        consumo =    "CONSUMPTION";
+        limitador =  "  LIMITER ";
 
         titulo0 = "   LAST 24 HOURS ENERGY   "; // 26 caracteres
         titulo1 = "          TODAY           "; // 26 caracteres
@@ -1116,7 +1181,7 @@ void UpdateLanguageTexts() {
         mens_mqtt_connected = "               CONNECTED TO MQTT                  ";
         mens_mqtt_failed =    "           FAILED TO CONNECT TO MQTT              ";
         mens_abrirwifimovil = "      CONNECT TO WIFI: MICROPIC-ENERGYMETER       ";
-        mens_navegador =      "      AND NAVIGATE TO PAGE 192.168.0.4            ";
+        mens_navegador =      "      AND NAVIGATE TO PAGE 192.168.4.1            ";
 
     }
 }

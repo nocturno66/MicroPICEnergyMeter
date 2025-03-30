@@ -15,11 +15,13 @@
 #define PIN_CONF    5
 #define PIN_UP      6
 
+#define LED         8
+
 typedef enum {
     MENU_LANGUAGE = 0,
     MENU_POWER,
     MENU_MAX_PRODUCTION,
-    MENU_MIN_CAPACITY,
+    MENU_LIMITER,
     MENU_CONNECTION,
     MENU_EXIT,
     MENU_OPTIONS_COUNT
@@ -40,7 +42,7 @@ extern uint8_t ImageBW[27200];
 // Variables relacionadas con los datos del JSON
 extern unsigned int v_produccion;
 extern unsigned int v_consumo;
-extern int v_capacidad;
+extern int v_limitador;
 extern String fecha;
 extern String hora;
 
@@ -64,9 +66,11 @@ int point_in_triangle(float px, float py, float x1, float y1, float x2, float y2
 uint8_t EPD_GetPixel (int x, int y);
 void EPD_InvertPoint (int x, int y);
 void invierte_circulo(int x, int y, int r);
+void invierte_pantalla();
 
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void reconnectMQTT();
+void sendMQTTMessage(const char* topic, const char* message);
 
 void display_micropic();
 void display_tiempo_real();
